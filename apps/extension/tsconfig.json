@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": ["entrypoints/**/*.ts", "entrypoints/**/*.tsx", "wxt.config.ts"]
+}
+

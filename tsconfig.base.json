@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "strict": true,
+    "jsx": "react-jsx",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "baseUrl": ".",
+    "paths": {
+      "@inspectra/core": ["packages/core/src/index.ts"],
+      "@inspectra/core/*": ["packages/core/src/*"],
+      "@inspectra/bridge": ["packages/bridge/src/index.ts"],
+      "@inspectra/bridge/*": ["packages/bridge/src/*"],
+      "@inspectra/agent-main": ["packages/agent-main/src/index.ts"],
+      "@inspectra/ui-overlay": ["packages/ui-overlay/src/index.tsx"],
+      "@inspectra/adapter-chromium": ["packages/adapter-chromium/src/index.ts"]
+    }
+  }
+}
+

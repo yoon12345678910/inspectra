@@ -1,0 +1,13 @@
+:host {
+  all: initial;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}

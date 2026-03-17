@@ -1,0 +1,12 @@
+.DS_Store
+.idea
+.vscode
+node_modules
+dist
+.wxt
+.output
+coverage
+playwright-report
+test-results
+pnpm-lock.yaml
+.pnpm-debug.log*

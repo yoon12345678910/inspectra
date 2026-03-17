@@ -1,0 +1,24 @@
+{
+  "name": "@inspectra/extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "build": "wxt build",
+    "zip": "wxt zip",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@inspectra/adapter-chromium": "workspace:*",
+    "@inspectra/agent-main": "workspace:*",
+    "@inspectra/bridge": "workspace:*",
+    "@inspectra/core": "workspace:*",
+    "@inspectra/ui-overlay": "workspace:*",
+    "@wxt-dev/module-react": "^1.2.2",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "wxt": "^0.20.19",
+    "zustand": "^5.0.8"
+  }
+}
