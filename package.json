@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "pnpm --filter @inspectra/extension dev",
     "build": "pnpm --filter @inspectra/extension build",
+    "build:bookmarklet": "node scripts/build-bookmarklet.mjs",
     "zip": "pnpm --filter @inspectra/extension zip",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",

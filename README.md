@@ -2,11 +2,15 @@
 
 Inspectra is a browser extension that injects Eruda into a live page and extends it with Inspectra-specific diagnostics through Eruda plugins.
 
+Inspectra can also be shipped as a bookmarklet bundle for browsers that do not support extensions.
+
 ## Workspace
 
 - `apps/extension`: WXT extension app
+- `apps/bookmarklet`: bookmarklet entrypoint bundle
 - `packages/agent-main`: main-world hooks for extra diagnostics
 - `packages/eruda-runtime`: Eruda initialization, visibility toggle, and plugin registration
+- `packages/eruda-plugin-media-permissions`: Eruda custom tab for camera/mic permission state
 - `packages/eruda-plugin-webrtc`: Eruda custom tab for WebRTC state
 
 ## Getting Started
@@ -23,6 +27,7 @@ Inspectra is a browser extension that injects Eruda into a live page and extends
 
 - `pnpm dev`: run the WXT extension in dev mode
 - `pnpm build`: build the extension
+- `pnpm build:bookmarklet`: build `dist/bookmarklet/inspectra-bookmarklet.js` and bookmarklet templates
 - `pnpm zip`: generate the extension zip
 - `pnpm test`: run the current test command
 - `pnpm typecheck`: run workspace type checks
@@ -31,4 +36,5 @@ Inspectra is a browser extension that injects Eruda into a live page and extends
 
 - Baseline debugger UX: Eruda
 - Injection model: extension action click, no app code changes
+- Distribution modes: extension first, bookmarklet optional
 - Inspectra value-add: Eruda wrapper runtime and plugin-based diagnostics
