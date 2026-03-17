@@ -15,7 +15,10 @@
       "@inspectra/agent-main": ["packages/agent-main/src/index.ts"],
       "@inspectra/eruda-runtime": ["packages/eruda-runtime/src/index.ts"],
       "@inspectra/eruda-runtime/protocol": ["packages/eruda-runtime/src/protocol.ts"],
-      "@inspectra/eruda-plugin-webrtc": ["packages/eruda-plugin-webrtc/src/index.ts"]
+      "@inspectra/eruda-plugin-webrtc": ["packages/eruda-plugin-webrtc/src/index.ts"],
+      "@inspectra/eruda-plugin-media-permissions": [
+        "packages/eruda-plugin-media-permissions/src/index.ts"
+      ]
     }
   }
 }

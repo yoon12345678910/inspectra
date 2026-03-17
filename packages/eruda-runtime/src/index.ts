@@ -1,5 +1,6 @@
 import eruda from 'eruda';
 import { bootstrapInspectraAgent } from '@inspectra/agent-main';
+import { createErudaMediaPermissionsPlugin } from '@inspectra/eruda-plugin-media-permissions';
 import { createErudaWebRtcPlugin } from '@inspectra/eruda-plugin-webrtc';
 import { isInspectraRuntimeMessage } from './protocol';
 
@@ -31,6 +32,7 @@ export const bootstrapInspectraErudaRuntime = () => {
       });
 
       eruda.add(createErudaWebRtcPlugin());
+      eruda.add(createErudaMediaPermissionsPlugin());
       eruda.get('info')?.add('Inspectra Session', () => latestSessionId);
       eruda.get('info')?.add('Inspectra Runtime', 'Eruda baseline + Inspectra plugins');
       erudaInitialized = true;

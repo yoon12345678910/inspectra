@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@inspectra/agent-main": "workspace:*",
+    "@inspectra/eruda-plugin-media-permissions": "workspace:*",
     "@inspectra/eruda-plugin-webrtc": "workspace:*",
     "eruda": "^3.4.3"
   }

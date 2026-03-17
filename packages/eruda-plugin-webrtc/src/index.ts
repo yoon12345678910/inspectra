@@ -27,7 +27,7 @@ export interface InspectraErudaState {
 
 declare global {
   interface Window {
-    __INSPECTRA_ERUDA_STATE__?: InspectraErudaState;
+    __INSPECTRA_ERUDA_STATE__?: Record<string, unknown>;
   }
 }
 
@@ -98,14 +98,13 @@ const buildHeaderStats = (events: WebRtcEvent[]) => {
 };
 
 export const getInspectraErudaState = (): InspectraErudaState => {
-  if (!window[STORE_KEY]) {
-    window[STORE_KEY] = {
-      sessionId: '',
-      webrtcEvents: []
-    };
-  }
-
-  return window[STORE_KEY];
+  const store = window[STORE_KEY] ?? {};
+  return {
+    sessionId: typeof store.sessionId === 'string' ? store.sessionId : '',
+    webrtcEvents: Array.isArray(store.webrtcEvents)
+      ? (store.webrtcEvents as WebRtcEvent[])
+      : []
+  };
 };
 
 export const createErudaWebRtcPlugin = () => (erudaApi: typeof eruda) => {

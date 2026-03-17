@@ -1,5 +1,5 @@
 {
-  "name": "@inspectra/agent-main",
+  "name": "@inspectra/eruda-plugin-media-permissions",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@inspectra/eruda-plugin-media-permissions": "workspace:*",
-    "@inspectra/eruda-plugin-webrtc": "workspace:*"
+    "eruda": "^3.4.3"
   }
 }

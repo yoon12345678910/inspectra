@@ -1,8 +1,15 @@
 import {
   INSPECTRA_WEBRTC_EVENT,
-  type InspectraErudaState,
   type WebRtcEvent
 } from '@inspectra/eruda-plugin-webrtc';
+import {
+  INSPECTRA_MEDIA_PERMISSIONS_EVENT,
+  createDefaultMediaPermissionSnapshot,
+  type InspectraMediaPermissionsState,
+  type MediaPermissionRequest,
+  type MediaPermissionSnapshot,
+  type MediaPermissionStateValue
+} from '@inspectra/eruda-plugin-media-permissions';
 
 const BRIDGE_CHANNEL = 'inspectra:bridge';
 
@@ -11,9 +18,14 @@ interface AgentState {
   sessionId: string;
 }
 
+interface InspectraRuntimeState
+  extends InspectraMediaPermissionsState {
+  webrtcEvents: WebRtcEvent[];
+}
+
 declare global {
   interface Window {
-    __INSPECTRA_ERUDA_STATE__?: InspectraErudaState;
+    __INSPECTRA_ERUDA_STATE__?: Record<string, unknown>;
   }
 }
 
@@ -54,6 +66,7 @@ const state: AgentState = {
 };
 
 const webrtcBuffer = new RingBuffer<WebRtcEvent>();
+let mediaPermissions = createDefaultMediaPermissionSnapshot();
 
 const baseEvent = () => ({
   id: createId(),
@@ -62,17 +75,32 @@ const baseEvent = () => ({
   pageUrl: location.href
 });
 
-const syncRuntimeState = (event?: WebRtcEvent) => {
-  if (event) {
-    webrtcBuffer.push(event);
+const syncRuntimeState = (next?: {
+  webrtcEvent?: WebRtcEvent;
+  mediaPermissions?: MediaPermissionSnapshot;
+}) => {
+  if (next?.webrtcEvent) {
+    webrtcBuffer.push(next.webrtcEvent);
   }
 
-  window.__INSPECTRA_ERUDA_STATE__ = {
-    sessionId: state.sessionId,
-    webrtcEvents: webrtcBuffer.toArray()
-  };
+  if (next?.mediaPermissions) {
+    mediaPermissions = next.mediaPermissions;
+  }
 
-  window.dispatchEvent(new CustomEvent(INSPECTRA_WEBRTC_EVENT));
+  const runtimeState: InspectraRuntimeState = {
+    sessionId: state.sessionId,
+    webrtcEvents: webrtcBuffer.toArray(),
+    mediaPermissions
+  };
+  window.__INSPECTRA_ERUDA_STATE__ = runtimeState as unknown as Record<string, unknown>;
+
+  if (next?.webrtcEvent) {
+    window.dispatchEvent(new CustomEvent(INSPECTRA_WEBRTC_EVENT));
+  }
+
+  if (next?.mediaPermissions) {
+    window.dispatchEvent(new CustomEvent(INSPECTRA_MEDIA_PERMISSIONS_EVENT));
+  }
 };
 
 const normalizeStats = async (peer: RTCPeerConnection) => {
@@ -136,7 +164,7 @@ const installWebRtcHook = () => {
         phase,
         data
       };
-      syncRuntimeState(event);
+      syncRuntimeState({ webrtcEvent: event });
     };
 
     emitPeer('created', {
@@ -185,15 +213,144 @@ const installWebRtcHook = () => {
   window.RTCPeerConnection = WrappedPeer;
 };
 
+const hasRequestedTrack = (constraint: MediaStreamConstraints['audio'] | MediaStreamConstraints['video']) =>
+  !(constraint === false || typeof constraint === 'undefined');
+
+const readPermissionState = async (
+  name: 'camera' | 'microphone'
+): Promise<MediaPermissionStateValue> => {
+  if (!('permissions' in navigator) || !navigator.permissions?.query) {
+    return 'unsupported';
+  }
+
+  try {
+    const status = await navigator.permissions.query({ name } as PermissionDescriptor);
+    return status.state;
+  } catch {
+    return 'unsupported';
+  }
+};
+
+const readDeviceCounts = async () => {
+  if (!navigator.mediaDevices?.enumerateDevices) {
+    return {
+      audioInputs: 0,
+      audioOutputs: 0,
+      videoInputs: 0
+    };
+  }
+
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    return devices.reduce(
+      (acc, device) => {
+        switch (device.kind) {
+          case 'audioinput':
+            acc.audioInputs += 1;
+            break;
+          case 'audiooutput':
+            acc.audioOutputs += 1;
+            break;
+          case 'videoinput':
+            acc.videoInputs += 1;
+            break;
+          default:
+            break;
+        }
+
+        return acc;
+      },
+      {
+        audioInputs: 0,
+        audioOutputs: 0,
+        videoInputs: 0
+      }
+    );
+  } catch {
+    return {
+      audioInputs: 0,
+      audioOutputs: 0,
+      videoInputs: 0
+    };
+  }
+};
+
+const refreshMediaPermissions = async (lastRequest?: MediaPermissionRequest) => {
+  const [camera, microphone, devices] = await Promise.all([
+    readPermissionState('camera'),
+    readPermissionState('microphone'),
+    readDeviceCounts()
+  ]);
+
+  syncRuntimeState({
+    mediaPermissions: {
+      secureContext: window.isSecureContext,
+      permissionsApiSupported: typeof navigator !== 'undefined' && 'permissions' in navigator,
+      camera,
+      microphone,
+      devices,
+      lastUpdated: Date.now(),
+      lastRequest: lastRequest ?? mediaPermissions.lastRequest
+    }
+  });
+};
+
+const installMediaPermissionHook = () => {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    void refreshMediaPermissions();
+    return;
+  }
+
+  const originalGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+  navigator.mediaDevices.getUserMedia = async (constraints = {}) => {
+    const request: MediaPermissionRequest = {
+      ts: Date.now(),
+      audio: hasRequestedTrack(constraints.audio),
+      video: hasRequestedTrack(constraints.video),
+      outcome: 'pending'
+    };
+
+    await refreshMediaPermissions(request);
+
+    try {
+      const stream = await originalGetUserMedia(constraints);
+      await refreshMediaPermissions({
+        ...request,
+        outcome: 'granted'
+      });
+      return stream;
+    } catch (error) {
+      const errorName = error instanceof DOMException ? error.name : 'UnknownError';
+      await refreshMediaPermissions({
+        ...request,
+        outcome:
+          errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError'
+            ? 'denied'
+            : 'error',
+        errorName,
+        errorMessage: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
+    }
+  };
+
+  navigator.mediaDevices.addEventListener?.('devicechange', () => {
+    void refreshMediaPermissions();
+  });
+
+  void refreshMediaPermissions();
+};
+
 const bootstrap = (sessionId: string) => {
   state.sessionId = sessionId;
-  syncRuntimeState();
+  syncRuntimeState({ mediaPermissions });
 
   if (state.bootstrapped) {
     return;
   }
 
   installWebRtcHook();
+  installMediaPermissionHook();
   state.bootstrapped = true;
 };
 
