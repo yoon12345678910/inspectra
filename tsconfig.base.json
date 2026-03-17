@@ -18,7 +18,8 @@
       "@inspectra/eruda-plugin-webrtc": ["packages/eruda-plugin-webrtc/src/index.ts"],
       "@inspectra/eruda-plugin-media-permissions": [
         "packages/eruda-plugin-media-permissions/src/index.ts"
-      ]
+      ],
+      "@inspectra/eruda-plugin-websocket": ["packages/eruda-plugin-websocket/src/index.ts"]
     }
   }
 }

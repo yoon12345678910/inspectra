@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@inspectra/agent-main": "workspace:*",
     "@inspectra/eruda-runtime": "workspace:*",
     "wxt": "^0.20.19"
   }

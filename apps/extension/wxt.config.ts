@@ -4,7 +4,7 @@ export default defineConfig({
   manifest: {
     name: 'Inspectra',
     description: 'Overlay debugger for live web pages.',
-    permissions: ['activeTab', 'scripting'],
+    permissions: ['activeTab', 'debugger', 'scripting'],
     host_permissions: ['<all_urls>'],
     action: {
       default_title: 'Toggle Inspectra'

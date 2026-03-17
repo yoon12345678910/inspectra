@@ -12,6 +12,7 @@ Inspectra can also be shipped as a bookmarklet bundle for browsers that do not s
 - `packages/eruda-runtime`: Eruda initialization, visibility toggle, and plugin registration
 - `packages/eruda-plugin-media-permissions`: Eruda custom tab for camera/mic permission state
 - `packages/eruda-plugin-webrtc`: Eruda custom tab for WebRTC state
+- `packages/eruda-plugin-websocket`: Eruda custom tab for WebSocket activity
 
 ## Getting Started
 

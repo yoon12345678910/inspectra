@@ -2,15 +2,18 @@ import eruda from 'eruda';
 import { bootstrapInspectraAgent } from '@inspectra/agent-main';
 import { createErudaMediaPermissionsPlugin } from '@inspectra/eruda-plugin-media-permissions';
 import { createErudaWebRtcPlugin } from '@inspectra/eruda-plugin-webrtc';
+import { createErudaWebSocketPlugin } from '@inspectra/eruda-plugin-websocket';
 import { isInspectraRuntimeMessage } from './protocol';
 
 export const bootstrapInspectraErudaRuntime = () => {
+  // Keep runtime injection self-sufficient even if the separate agent content script
+  // is not present in a given build or browser session.
   bootstrapInspectraAgent();
 
   let erudaInitialized = false;
   let latestSessionId = '';
 
-  const ensureEruda = (sessionId: string) => {
+  const ensureEruda = () => {
     if (!erudaInitialized) {
       eruda.init({
         autoScale: true,
@@ -33,12 +36,13 @@ export const bootstrapInspectraErudaRuntime = () => {
 
       eruda.add(createErudaWebRtcPlugin());
       eruda.add(createErudaMediaPermissionsPlugin());
+      eruda.add(createErudaWebSocketPlugin());
       eruda.get('info')?.add('Inspectra Session', () => latestSessionId);
       eruda.get('info')?.add('Inspectra Runtime', 'Eruda baseline + Inspectra plugins');
+      eruda.hide();
+      eruda.get('entryBtn')?.hide();
       erudaInitialized = true;
     }
-
-    latestSessionId = sessionId;
   };
 
   window.addEventListener('message', (event) => {
@@ -48,17 +52,17 @@ export const bootstrapInspectraErudaRuntime = () => {
 
     switch (event.data.type) {
       case 'agent:bootstrap':
-        ensureEruda(event.data.payload.sessionId);
+        latestSessionId = event.data.payload.sessionId;
         break;
       case 'overlay:set-visible':
-        if (!erudaInitialized) {
-          return;
-        }
-
         if (event.data.payload.visible) {
+          ensureEruda();
           eruda.get('entryBtn')?.show();
           eruda.show();
         } else {
+          if (!erudaInitialized) {
+            return;
+          }
           eruda.hide();
           eruda.get('entryBtn')?.hide();
         }

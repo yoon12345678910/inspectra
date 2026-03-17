@@ -23,3 +23,9 @@
 - 이유: entrypoint 파일에 Eruda 초기화 로직이 퍼지면 유지보수가 어렵다.
 - 대안: `main-world.ts`에서 직접 초기화
 - 영향: `packages/eruda-runtime`이 Eruda wrapper 역할을 맡는다.
+
+## 2026-03-17
+### WebSocket은 Chromium debugger API로 수집
+- 이유: main-world `window.WebSocket` 후킹만으로는 worker/early bootstrap 소켓을 안정적으로 잡을 수 없다.
+- 대안: main-world hook만 유지, worker patch 확장
+- 영향: `apps/extension` background가 `chrome.debugger`로 `Network.webSocket*` 이벤트를 수집하고, content/runtime 경로로 Eruda websocket 탭에 전달한다.

@@ -1,6 +1,7 @@
 import { bootstrapInspectraAgent } from '@inspectra/agent-main';
 import { createErudaMediaPermissionsPlugin } from '@inspectra/eruda-plugin-media-permissions';
 import { createErudaWebRtcPlugin } from '@inspectra/eruda-plugin-webrtc';
+import { createErudaWebSocketPlugin } from '@inspectra/eruda-plugin-websocket';
 
 type ErudaTool = {
   add?(label: string, value: string | (() => string)): void;
@@ -116,6 +117,7 @@ export const launchInspectraBookmarklet = async () => {
 
     eruda.add(createErudaWebRtcPlugin());
     eruda.add(createErudaMediaPermissionsPlugin());
+    eruda.add(createErudaWebSocketPlugin());
     eruda.get('info')?.add?.('Inspectra Session', () => state.sessionId);
     eruda.get('info')?.add?.('Inspectra Runtime', 'Bookmarklet');
     state.initialized = true;

@@ -12,6 +12,25 @@ export type InspectraRuntimeMessage =
       source: 'inspectra-content';
       type: 'overlay:set-visible';
       payload: { visible: boolean };
+    }
+  | {
+      channel: string;
+      source: 'inspectra-content';
+      type: 'websocket:debugger-event';
+      payload: {
+        requestId: string;
+        phase:
+          | 'created'
+          | 'handshake-request'
+          | 'open'
+          | 'sent'
+          | 'message'
+          | 'error'
+          | 'closed';
+        url?: string;
+        timestamp?: number;
+        data: Record<string, unknown>;
+      };
     };
 
 export const postToInspectraRuntime = (
