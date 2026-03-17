@@ -18,17 +18,9 @@ declare global {
 }
 
 class RingBuffer<T> {
-  #capacity: number;
   #items: T[] = [];
 
-  constructor(capacity: number) {
-    this.#capacity = capacity;
-  }
-
   push(item: T) {
-    if (this.#items.length >= this.#capacity) {
-      this.#items.shift();
-    }
     this.#items.push(item);
   }
 
@@ -61,7 +53,7 @@ const state: AgentState = {
   sessionId: ''
 };
 
-const webrtcBuffer = new RingBuffer<WebRtcEvent>(50);
+const webrtcBuffer = new RingBuffer<WebRtcEvent>();
 
 const baseEvent = () => ({
   id: createId(),
