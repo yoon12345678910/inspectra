@@ -32,6 +32,18 @@ Inspectra can also be shipped as a bookmarklet bundle for browsers that do not s
 - `pnpm test`: run the current test command
 - `pnpm typecheck`: run workspace type checks
 
+## Bookmarklet Hosting
+
+GitHub Pages deployment is supported.
+
+1. Enable `Settings -> Pages -> Source: GitHub Actions`
+2. Push to `main`
+3. The `pages-bookmarklet` workflow publishes `dist/bookmarklet`
+
+Guide:
+
+- [docs/bookmarklet.md](/Users/jongik/Documents/code/inspectra/docs/bookmarklet.md)
+
 ## Product Direction
 
 - Baseline debugger UX: Eruda

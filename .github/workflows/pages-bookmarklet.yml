@@ -1,0 +1,50 @@
+name: pages-bookmarklet
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-bookmarklet
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: actions/configure-pages@v5
+
+      - run: pnpm install --no-frozen-lockfile
+
+      - name: Build bookmarklet bundle
+        env:
+          INSPECTRA_BOOKMARKLET_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/inspectra-bookmarklet.js
+        run: pnpm run build:bookmarklet
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/bookmarklet
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
