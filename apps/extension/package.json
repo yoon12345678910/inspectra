@@ -10,15 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@inspectra/adapter-chromium": "workspace:*",
-    "@inspectra/agent-main": "workspace:*",
-    "@inspectra/bridge": "workspace:*",
-    "@inspectra/core": "workspace:*",
-    "@inspectra/ui-overlay": "workspace:*",
-    "@wxt-dev/module-react": "^1.2.2",
-    "react": "^19.1.1",
-    "react-dom": "^19.1.1",
-    "wxt": "^0.20.19",
-    "zustand": "^5.0.8"
+    "@inspectra/eruda-runtime": "workspace:*",
+    "wxt": "^0.20.19"
   }
 }

@@ -1,14 +1,13 @@
 import { defineConfig } from 'wxt';
 
 export default defineConfig({
-  modules: ['@wxt-dev/module-react'],
   manifest: {
     name: 'Inspectra',
     description: 'Overlay debugger for live web pages.',
-    permissions: ['activeTab', 'storage', 'scripting'],
+    permissions: ['activeTab', 'scripting'],
     host_permissions: ['<all_urls>'],
     action: {
-      default_title: 'Toggle Inspectra overlay'
+      default_title: 'Toggle Inspectra'
     },
     web_accessible_resources: [
       {
@@ -18,4 +17,3 @@ export default defineConfig({
     ]
   }
 });
-

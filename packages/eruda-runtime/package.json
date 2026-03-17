@@ -1,0 +1,18 @@
+{
+  "name": "@inspectra/eruda-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./protocol": "./src/protocol.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@inspectra/agent-main": "workspace:*",
+    "@inspectra/eruda-plugin-webrtc": "workspace:*",
+    "eruda": "^3.4.3"
+  }
+}

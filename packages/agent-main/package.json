@@ -10,8 +10,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@inspectra/bridge": "workspace:*",
-    "@inspectra/core": "workspace:*"
+    "@inspectra/eruda-plugin-webrtc": "workspace:*"
   }
 }
-

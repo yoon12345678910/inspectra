@@ -12,14 +12,10 @@
     "allowSyntheticDefaultImports": true,
     "baseUrl": ".",
     "paths": {
-      "@inspectra/core": ["packages/core/src/index.ts"],
-      "@inspectra/core/*": ["packages/core/src/*"],
-      "@inspectra/bridge": ["packages/bridge/src/index.ts"],
-      "@inspectra/bridge/*": ["packages/bridge/src/*"],
       "@inspectra/agent-main": ["packages/agent-main/src/index.ts"],
-      "@inspectra/ui-overlay": ["packages/ui-overlay/src/index.tsx"],
-      "@inspectra/adapter-chromium": ["packages/adapter-chromium/src/index.ts"]
+      "@inspectra/eruda-runtime": ["packages/eruda-runtime/src/index.ts"],
+      "@inspectra/eruda-runtime/protocol": ["packages/eruda-runtime/src/protocol.ts"],
+      "@inspectra/eruda-plugin-webrtc": ["packages/eruda-plugin-webrtc/src/index.ts"]
     }
   }
 }
-

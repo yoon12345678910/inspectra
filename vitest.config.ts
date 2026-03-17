@@ -8,12 +8,15 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@inspectra/core': path.resolve(__dirname, 'packages/core/src/index.ts'),
-      '@inspectra/bridge': path.resolve(__dirname, 'packages/bridge/src/index.ts'),
       '@inspectra/agent-main': path.resolve(__dirname, 'packages/agent-main/src/index.ts'),
-      '@inspectra/ui-overlay': path.resolve(__dirname, 'packages/ui-overlay/src/index.tsx'),
-      '@inspectra/adapter-chromium': path.resolve(__dirname, 'packages/adapter-chromium/src/index.ts')
+      '@inspectra/eruda-runtime': path.resolve(
+        __dirname,
+        'packages/eruda-runtime/src/index.ts'
+      ),
+      '@inspectra/eruda-plugin-webrtc': path.resolve(
+        __dirname,
+        'packages/eruda-plugin-webrtc/src/index.ts'
+      )
     }
   }
 });
-

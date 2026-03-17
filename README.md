@@ -1,15 +1,13 @@
 # Inspectra
 
-Inspectra is an overlay debugger browser extension for live pages. The first implementation target is a Chrome/Edge Desktop MVP with a React + TypeScript + WXT workspace.
+Inspectra is a browser extension that injects Eruda into a live page and extends it with Inspectra-specific diagnostics through Eruda plugins.
 
 ## Workspace
 
 - `apps/extension`: WXT extension app
-- `packages/core`: shared event, settings, redaction, and export logic
-- `packages/bridge`: page/content bridge protocol
-- `packages/agent-main`: main-world hooks
-- `packages/ui-overlay`: overlay React UI and store
-- `packages/adapter-chromium`: Chromium deep-mode skeleton
+- `packages/agent-main`: main-world hooks for extra diagnostics
+- `packages/eruda-runtime`: Eruda initialization, visibility toggle, and plugin registration
+- `packages/eruda-plugin-webrtc`: Eruda custom tab for WebRTC state
 
 ## Getting Started
 
@@ -26,6 +24,11 @@ Inspectra is an overlay debugger browser extension for live pages. The first imp
 - `pnpm dev`: run the WXT extension in dev mode
 - `pnpm build`: build the extension
 - `pnpm zip`: generate the extension zip
-- `pnpm test`: run unit tests
+- `pnpm test`: run the current test command
 - `pnpm typecheck`: run workspace type checks
 
+## Product Direction
+
+- Baseline debugger UX: Eruda
+- Injection model: extension action click, no app code changes
+- Inspectra value-add: Eruda wrapper runtime and plugin-based diagnostics
