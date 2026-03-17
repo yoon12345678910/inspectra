@@ -33,14 +33,6 @@ export const bootstrapInspectraErudaRuntime = () => {
       eruda.add(createErudaWebRtcPlugin());
       eruda.get('info')?.add('Inspectra Session', () => latestSessionId);
       eruda.get('info')?.add('Inspectra Runtime', 'Eruda baseline + Inspectra plugins');
-      eruda.get('snippets')?.add(
-        'Hide Inspectra',
-        () => {
-          eruda.hide();
-          eruda.get('entryBtn')?.hide();
-        },
-        'Hide the Eruda panel and entry button'
-      );
       erudaInitialized = true;
     }
 
