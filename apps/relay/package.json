@@ -7,10 +7,10 @@
     "start": "node --import tsx src/node.ts"
   },
   "dependencies": {
+    "tsx": "^4.19.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@types/ws": "^8.18.1",
-    "tsx": "^4.19.0"
+    "@types/ws": "^8.18.1"
   }
 }
