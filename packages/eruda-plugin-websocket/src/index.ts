@@ -155,9 +155,28 @@ const formatPayloadDetail = (data: Record<string, unknown>) => {
   if (typeof data.payloadBase64 === 'string') {
     const meta = { ...data };
     delete meta.payloadBase64;
+    delete meta.payloadText;
+    delete meta.payloadHex;
     delete meta.preview;
     const metaBlock = formatData(meta);
-    return `${metaBlock}\n\n── payload (base64) ──\n${escapeHtml(data.payloadBase64 as string)}${data.truncated ? '\n... (truncated)' : ''}`;
+
+    const sections: string[] = [metaBlock];
+
+    if (typeof data.payloadText === 'string') {
+      sections.push(`── decoded (UTF-8) ──\n${escapeHtml(data.payloadText as string)}`);
+    }
+
+    if (typeof data.payloadHex === 'string') {
+      sections.push(`── hex dump ──\n${escapeHtml(data.payloadHex as string)}`);
+    }
+
+    sections.push(`── raw (base64) ──\n${escapeHtml(data.payloadBase64 as string)}`);
+
+    if (data.truncated) {
+      sections.push('... (truncated)');
+    }
+
+    return sections.join('\n\n');
   }
 
   return formatData(data);

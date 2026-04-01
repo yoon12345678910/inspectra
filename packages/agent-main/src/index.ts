@@ -301,6 +301,43 @@ const normalizeProtocols = (value?: string | string[]) => {
   return Array.isArray(value) ? value : [value];
 };
 
+const tryDecodeUtf8 = (bytes: Uint8Array): string | null => {
+  try {
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    const printable = /^[\x20-\x7E\t\n\r]*$/.test(text) || /^[^\x00-\x08\x0E-\x1F]*$/.test(text);
+    return printable ? text : null;
+  } catch {
+    return null;
+  }
+};
+
+const toHexDump = (bytes: Uint8Array, maxBytes = 256): string => {
+  const lines: string[] = [];
+  const limit = Math.min(bytes.length, maxBytes);
+  for (let offset = 0; offset < limit; offset += 16) {
+    const chunk = bytes.slice(offset, Math.min(offset + 16, limit));
+    const hex = Array.from(chunk).map(b => b.toString(16).padStart(2, '0')).join(' ');
+    const ascii = Array.from(chunk).map(b => (b >= 0x20 && b <= 0x7e) ? String.fromCharCode(b) : '.').join('');
+    lines.push(`${offset.toString(16).padStart(6, '0')}  ${hex.padEnd(48)}  ${ascii}`);
+  }
+  if (bytes.length > maxBytes) {
+    lines.push(`... ${bytes.length - maxBytes} more bytes`);
+  }
+  return lines.join('\n');
+};
+
+const normalizeBinaryPayload = (bytes: Uint8Array, totalSize: number, typeName: string) => {
+  const textContent = tryDecodeUtf8(bytes);
+  return {
+    size: totalSize,
+    preview: textContent ? textContent.slice(0, 160) : `<${typeName} ${totalSize} bytes>`,
+    payloadBase64: uint8ToBase64(bytes),
+    payloadText: textContent ?? undefined,
+    payloadHex: toHexDump(bytes),
+    truncated: totalSize > MAX_BINARY_PAYLOAD_CAPTURE
+  };
+};
+
 const normalizePayload = (value: unknown) => {
   if (typeof value === 'string') {
     const captured = value.length <= MAX_TEXT_PAYLOAD_CAPTURE;
@@ -317,10 +354,7 @@ const normalizePayload = (value: unknown) => {
     const bytes = new Uint8Array(value.slice(0, MAX_BINARY_PAYLOAD_CAPTURE));
     return {
       payloadType: 'array-buffer',
-      size: value.byteLength,
-      preview: `<ArrayBuffer ${value.byteLength} bytes>`,
-      payloadBase64: uint8ToBase64(bytes),
-      truncated: value.byteLength > MAX_BINARY_PAYLOAD_CAPTURE
+      ...normalizeBinaryPayload(bytes, value.byteLength, 'ArrayBuffer')
     };
   }
 
@@ -332,10 +366,7 @@ const normalizePayload = (value: unknown) => {
     );
     return {
       payloadType: 'typed-array',
-      size: value.byteLength,
-      preview: `<${value.constructor.name} ${value.byteLength} bytes>`,
-      payloadBase64: uint8ToBase64(slice),
-      truncated: value.byteLength > MAX_BINARY_PAYLOAD_CAPTURE
+      ...normalizeBinaryPayload(slice, value.byteLength, value.constructor.name)
     };
   }
 
