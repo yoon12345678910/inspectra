@@ -61,6 +61,8 @@ importers:
         specifier: ^3.4.3
         version: 3.4.3
 
+  packages/eruda-plugin-remote: {}
+
   packages/eruda-plugin-webrtc:
     dependencies:
       eruda:
@@ -78,6 +80,9 @@ importers:
       '@inspectra/eruda-plugin-media-permissions':
         specifier: workspace:*
         version: link:../eruda-plugin-media-permissions
+      '@inspectra/eruda-plugin-remote':
+        specifier: workspace:*
+        version: link:../eruda-plugin-remote
       '@inspectra/eruda-plugin-webrtc':
         specifier: workspace:*
         version: link:../eruda-plugin-webrtc
@@ -96,6 +101,9 @@ importers:
       '@inspectra/eruda-plugin-media-permissions':
         specifier: workspace:*
         version: link:../eruda-plugin-media-permissions
+      '@inspectra/eruda-plugin-remote':
+        specifier: workspace:*
+        version: link:../eruda-plugin-remote
       '@inspectra/eruda-plugin-webrtc':
         specifier: workspace:*
         version: link:../eruda-plugin-webrtc
