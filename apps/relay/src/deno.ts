@@ -27,7 +27,7 @@ const sendPeerCount = (room: string) => {
   }
 };
 
-Deno.serve({ port: Number(Deno.env.get('PORT')) || 9229 }, (req) => {
+Deno.serve((req) => {
   if (req.headers.get('upgrade') !== 'websocket') {
     return new Response('Inspectra Relay — WebSocket endpoint', { status: 200 });
   }
