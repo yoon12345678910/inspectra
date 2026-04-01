@@ -1,0 +1,28 @@
+name: deploy-relay
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - apps/relay/**
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-relay
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: denoland/deployctl@v1
+        with:
+          project: ${{ vars.DENO_DEPLOY_PROJECT }}
+          entrypoint: apps/relay/src/deno.ts
