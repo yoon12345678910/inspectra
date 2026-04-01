@@ -38,6 +38,8 @@ declare global {
   }
 }
 
+/* ── helpers ── */
+
 const escapeHtml = (value: string) =>
   value
     .replaceAll('&', '&amp;')
@@ -46,74 +48,58 @@ const escapeHtml = (value: string) =>
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
 
-const formatData = (data: Record<string, unknown>) => {
+const formatTimestamp = (ts: number) => {
+  const d = new Date(ts);
+  const h = String(d.getHours()).padStart(2, '0');
+  const m = String(d.getMinutes()).padStart(2, '0');
+  const s = String(d.getSeconds()).padStart(2, '0');
+  const ms = String(d.getMilliseconds()).padStart(3, '0');
+  return `${h}:${m}:${s}.${ms}`;
+};
+
+const formatSize = (size: unknown) => {
+  if (typeof size !== 'number') return '';
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+};
+
+const prettyJson = (str: string) => {
   try {
-    return escapeHtml(JSON.stringify(data, null, 2));
+    return JSON.stringify(JSON.parse(str), null, 2);
   } catch {
-    return '';
+    return str;
   }
 };
 
-const formatTimestamp = (timestamp: number) => {
-  const date = new Date(timestamp);
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  const seconds = String(date.getSeconds()).padStart(2, '0');
-  const milliseconds = String(date.getMilliseconds()).padStart(3, '0');
-  return `${hours}:${minutes}:${seconds}.${milliseconds}`;
+const closeCodeLabel = (code: unknown): string => {
+  if (typeof code !== 'number') return '';
+  const labels: Record<number, string> = {
+    1000: 'Normal Closure',
+    1001: 'Going Away',
+    1002: 'Protocol Error',
+    1003: 'Unsupported Data',
+    1005: 'No Status Received',
+    1006: 'Abnormal Closure',
+    1007: 'Invalid Payload',
+    1008: 'Policy Violation',
+    1009: 'Message Too Big',
+    1010: 'Missing Extension',
+    1011: 'Internal Error',
+    1015: 'TLS Handshake'
+  };
+  return labels[code] ?? `Code ${code}`;
 };
 
-const formatMetric = (value: unknown, fallback = 'N/A') => {
-  if (value === null || value === undefined || value === '') {
-    return fallback;
-  }
+type DirectionFilter = 'all' | 'sent' | 'received';
 
-  return String(value);
-};
-
-const summarizeEvent = (event: WebSocketEvent) => {
-  const data = event.data;
-  const chips: [string, string][] = [
-    ['phase', event.phase],
-    ['direction', formatMetric(data.direction)],
-    ['type', formatMetric(data.payloadType)],
-    ['size', formatMetric(data.size)],
-    ['state', formatMetric(data.readyState)],
-    ['code', formatMetric(data.code)]
-  ];
-
-  if (event.phase === 'handshake-request' && data.headers && typeof data.headers === 'object') {
-    chips.push(['headers', String(Object.keys(data.headers as Record<string, unknown>).length)]);
-  }
-
-  if (typeof data.opcode === 'number') {
-    chips.push(['opcode', String(data.opcode)]);
-  }
-
-  if (typeof data.mask === 'boolean') {
-    chips.push(['mask', data.mask ? 'yes' : 'no']);
-  }
-
-  if (data.truncated === true) {
-    chips.push(['truncated', 'yes']);
-  }
-
-  return chips
-    .filter(([, value]) => value !== 'N/A')
-    .slice(0, 8);
-};
-
-const buildHeaderStats = (events: WebSocketEvent[]) => {
-  const socketIds = new Set(events.map((event) => event.socketId));
-  const latest = events[events.length - 1];
-
-  return [
-    ['Sockets', String(socketIds.size)],
-    ['Events', String(events.length)],
-    ['Last phase', latest ? latest.phase : 'N/A'],
-    ['Last update', latest ? formatTimestamp(latest.ts) : 'N/A']
-  ];
-};
+interface SocketInfo {
+  socketId: string;
+  url: string;
+  open: boolean;
+  eventCount: number;
+  firstSeen: number;
+}
 
 const createDefaultDebuggerState = (): WebSocketDebuggerState => ({
   status: 'idle'
@@ -121,65 +107,53 @@ const createDefaultDebuggerState = (): WebSocketDebuggerState => ({
 
 const formatStatusLabel = (status: WebSocketDebuggerState['status']) => {
   switch (status) {
-    case 'attached':
-      return 'Debugger attached';
-    case 'detached':
-      return 'Debugger detached';
-    case 'conflict':
-      return 'Debugger conflict';
-    case 'error':
-      return 'Debugger error';
-    default:
-      return 'Debugger idle';
+    case 'attached': return 'Debugger attached';
+    case 'detached': return 'Debugger detached';
+    case 'conflict': return 'Debugger conflict';
+    case 'error': return 'Debugger error';
+    default: return 'Debugger idle';
   }
-};
-
-const summarizePreview = (data: Record<string, unknown>) => {
-  const preview = typeof data.preview === 'string' ? data.preview.trim() : '';
-  if (!preview) {
-    return '';
-  }
-
-  return preview.length > 256 ? `${preview.slice(0, 256)}...` : preview;
 };
 
 const formatPayloadDetail = (data: Record<string, unknown>) => {
   if (typeof data.payload === 'string') {
-    const meta = { ...data };
-    delete meta.payload;
-    delete meta.preview;
-    const metaBlock = formatData(meta);
-    return `${metaBlock}\n\n── payload ──\n${escapeHtml(data.payload)}${data.truncated ? '\n... (truncated)' : ''}`;
+    return escapeHtml(prettyJson(data.payload)) + (data.truncated ? '\n… (truncated)' : '');
   }
 
   if (typeof data.payloadBase64 === 'string') {
-    const meta = { ...data };
-    delete meta.payloadBase64;
-    delete meta.payloadText;
-    delete meta.payloadHex;
-    delete meta.preview;
-    const metaBlock = formatData(meta);
-
-    const sections: string[] = [metaBlock];
-
+    const sections: string[] = [];
     if (typeof data.payloadText === 'string') {
       sections.push(`── decoded (UTF-8) ──\n${escapeHtml(data.payloadText as string)}`);
     }
-
     if (typeof data.payloadHex === 'string') {
       sections.push(`── hex dump ──\n${escapeHtml(data.payloadHex as string)}`);
     }
-
     sections.push(`── raw (base64) ──\n${escapeHtml(data.payloadBase64 as string)}`);
-
-    if (data.truncated) {
-      sections.push('... (truncated)');
-    }
-
+    if (data.truncated) sections.push('… (truncated)');
     return sections.join('\n\n');
   }
 
-  return formatData(data);
+  return '';
+};
+
+const formatHeadersDetail = (data: Record<string, unknown>) => {
+  const headers = data.headers as Record<string, unknown> | undefined;
+  const response = data.response as Record<string, unknown> | undefined;
+  const sections: string[] = [];
+
+  if (headers && typeof headers === 'object') {
+    sections.push('── Request Headers ──');
+    for (const [k, v] of Object.entries(headers)) {
+      sections.push(`${escapeHtml(k)}: ${escapeHtml(String(v))}`);
+    }
+  }
+
+  if (response && typeof response === 'object') {
+    sections.push('\n── Response ──');
+    sections.push(escapeHtml(JSON.stringify(response, null, 2)));
+  }
+
+  return sections.join('\n');
 };
 
 export const getInspectraWebSocketState = (): InspectraWebSocketState => {
@@ -196,93 +170,395 @@ export const getInspectraWebSocketState = (): InspectraWebSocketState => {
   };
 };
 
+/* ── CSS ── */
+
+const CSS = `
+.ws-root {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  color: inherit;
+  box-sizing: border-box;
+}
+
+/* ── toolbar ── */
+.ws-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border, rgba(127,127,127,.2));
+  background: var(--darker-background, rgba(127,127,127,.06));
+  flex-shrink: 0;
+}
+.ws-filter-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border, rgba(127,127,127,.2));
+  border-radius: 4px;
+  background: var(--background, transparent);
+  color: inherit;
+  font-size: 11px;
+  outline: none;
+}
+.ws-filter-input:focus {
+  border-color: var(--accent, #4a90d9);
+}
+.ws-dir-btn {
+  padding: 3px 8px;
+  border: 1px solid var(--border, rgba(127,127,127,.2));
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  opacity: .6;
+}
+.ws-dir-btn.is-active {
+  opacity: 1;
+  background: var(--accent, #4a90d9);
+  color: #fff;
+  border-color: var(--accent, #4a90d9);
+}
+
+/* ── debugger status ── */
+.ws-debugger {
+  padding: 4px 10px;
+  font-size: 11px;
+  border-bottom: 1px solid var(--border, rgba(127,127,127,.2));
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
+}
+.ws-debugger-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #999;
+  flex-shrink: 0;
+}
+.ws-debugger.is-attached .ws-debugger-dot { background: #39b54a; }
+.ws-debugger.is-detached .ws-debugger-dot { background: #f4b400; }
+.ws-debugger.is-error .ws-debugger-dot,
+.ws-debugger.is-conflict .ws-debugger-dot { background: #ff5f56; }
+
+/* ── body (connection selector + main) ── */
+.ws-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── connection selector (dropdown) ── */
+.ws-conn-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border, rgba(127,127,127,.2));
+  background: var(--darker-background, rgba(127,127,127,.06));
+  flex-shrink: 0;
+}
+.ws-conn-select {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--border, rgba(127,127,127,.2));
+  border-radius: 4px;
+  background: var(--background, transparent);
+  color: inherit;
+  font-size: 11px;
+}
+.ws-conn-status {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.ws-conn-status.is-open { background: #39b54a; }
+.ws-conn-status.is-closed { background: #999; }
+.ws-conn-count {
+  font-size: 11px;
+  opacity: .6;
+  white-space: nowrap;
+}
+
+/* ── message table ── */
+.ws-table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.ws-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.ws-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--darker-background, rgba(127,127,127,.06));
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  text-align: left;
+  border-bottom: 1px solid var(--border, rgba(127,127,127,.2));
+  white-space: nowrap;
+  opacity: .7;
+}
+.ws-table td {
+  padding: 4px 8px;
+  font-size: 11px;
+  border-bottom: 1px solid var(--border, rgba(127,127,127,.1));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ws-table tr:hover td {
+  background: rgba(127,127,127,.06);
+}
+.ws-table tr.is-selected td {
+  background: rgba(127,127,127,.12);
+}
+.ws-col-dir { width: 24px; text-align: center; }
+.ws-col-data { }
+.ws-col-size { width: 60px; text-align: right; }
+.ws-col-time { width: 75px; text-align: right; }
+
+.ws-arrow-up { color: #39b54a; }
+.ws-arrow-down { color: #e74c3c; }
+.ws-phase-badge {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 500;
+  border: 1px solid var(--border, rgba(127,127,127,.2));
+  opacity: .8;
+}
+.ws-phase-open { color: #39b54a; border-color: #39b54a; }
+.ws-phase-closed { color: #e74c3c; border-color: #e74c3c; }
+.ws-phase-error { color: #ff5f56; border-color: #ff5f56; }
+
+/* ── detail panel ── */
+.ws-detail {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border, rgba(127,127,127,.2));
+  display: flex;
+  flex-direction: column;
+  max-height: 45%;
+  min-height: 0;
+}
+.ws-detail-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border, rgba(127,127,127,.2));
+  flex-shrink: 0;
+}
+.ws-detail-tab {
+  padding: 5px 12px;
+  font-size: 11px;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: inherit;
+  opacity: .6;
+  border-bottom: 2px solid transparent;
+}
+.ws-detail-tab.is-active {
+  opacity: 1;
+  border-bottom-color: var(--accent, #4a90d9);
+}
+.ws-detail-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 10px;
+}
+.ws-detail-body pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.ws-detail-meta {
+  font-size: 11px;
+  line-height: 1.6;
+}
+.ws-detail-meta dt {
+  display: inline;
+  opacity: .6;
+}
+.ws-detail-meta dt::after { content: ': '; }
+.ws-detail-meta dd {
+  display: inline;
+  margin: 0;
+}
+.ws-detail-meta dd::after { content: '\\A'; white-space: pre; }
+
+.ws-empty {
+  padding: 20px 10px;
+  text-align: center;
+  opacity: .5;
+  font-size: 12px;
+}
+`;
+
+/* ── plugin ── */
+
 export const createErudaWebSocketPlugin = () => (erudaApi: typeof eruda) => {
   class InspectraWebSocketTool extends erudaApi.Tool {
     name = 'websocket';
     private panel?: ErudaPanelElement;
     private onUpdate = () => this.render();
-    private onScroll = () => {
-      const container = this.findScrollContainer();
-      if (container) {
-        this.scrollTop = container.scrollTop;
-      }
-    };
-    private scrollTop = 0;
-    private selectedEventId?: string;
-    private expandAllDetails = false;
-    private scrollBoundElement?: HTMLElement;
 
-    private findScrollContainer() {
-      return document.querySelector('.inspectra-websocket .inspectra-scroll') as HTMLElement | null;
-    }
+    private selectedSocketId: string | null = null;
+    private selectedEventId: string | null = null;
+    private detailTab: 'payload' | 'headers' | 'meta' = 'payload';
+    private filterText = '';
+    private directionFilter: DirectionFilter = 'all';
+    private tableScrollTop = 0;
 
-    private bindScrollState() {
-      const container = this.findScrollContainer();
-      if (!container || this.scrollBoundElement === container) {
-        return;
-      }
-
-      this.scrollBoundElement?.removeEventListener('scroll', this.onScroll);
-      container.addEventListener('scroll', this.onScroll, { passive: true });
-      this.scrollBoundElement = container;
-    }
-
-    private captureViewportAnchor() {
-      const container = this.findScrollContainer();
-      const selectedCard = container?.querySelector('.inspectra-card.is-selected') as HTMLElement | null;
-
-      return {
-        scrollTop: container?.scrollTop ?? this.scrollTop,
-        selectedOffset:
-          container && selectedCard
-            ? selectedCard.getBoundingClientRect().top - container.getBoundingClientRect().top
-            : null
-      };
-    }
-
-    private restoreViewportAnchor(anchor: { scrollTop: number; selectedOffset: number | null }) {
-      const container = this.findScrollContainer();
-      if (!container) {
-        return;
-      }
-
-      if (anchor.selectedOffset !== null && this.selectedEventId) {
-        const selectedCard = container.querySelector('.inspectra-card.is-selected') as HTMLElement | null;
-        if (selectedCard) {
-          const nextOffset = selectedCard.getBoundingClientRect().top - container.getBoundingClientRect().top;
-          container.scrollTop += nextOffset - anchor.selectedOffset;
-          this.scrollTop = container.scrollTop;
-          return;
+    private getSocketList(events: WebSocketEvent[]): SocketInfo[] {
+      const map = new Map<string, SocketInfo>();
+      for (const e of events) {
+        let info = map.get(e.socketId);
+        if (!info) {
+          info = {
+            socketId: e.socketId,
+            url: String(e.data.url ?? e.socketId),
+            open: false,
+            eventCount: 0,
+            firstSeen: e.ts
+          };
+          map.set(e.socketId, info);
         }
+        info.eventCount++;
+        if (e.phase === 'open') info.open = true;
+        if (e.phase === 'closed' || e.phase === 'error') info.open = false;
+        if (typeof e.data.url === 'string') info.url = e.data.url;
       }
-
-      container.scrollTop = anchor.scrollTop;
-      this.scrollTop = anchor.scrollTop;
+      return [...map.values()];
     }
 
-    private bindInteractionState() {
-      const root = document.querySelector('.inspectra-websocket');
-      if (!root) {
-        return;
+    private getFilteredMessages(events: WebSocketEvent[]): WebSocketEvent[] {
+      let filtered = events;
+
+      if (this.selectedSocketId) {
+        filtered = filtered.filter((e) => e.socketId === this.selectedSocketId);
       }
 
-      const expandToggle = root.querySelector('[data-role="expand-details"]') as HTMLInputElement | null;
-      expandToggle?.addEventListener('change', () => {
-        this.expandAllDetails = expandToggle.checked;
-        this.render();
-      });
+      const messagePhases = new Set<string>(['sent', 'message', 'open', 'closed', 'error', 'created', 'handshake-request']);
+      filtered = filtered.filter((e) => messagePhases.has(e.phase));
 
-      root.querySelectorAll<HTMLElement>('[data-event-id]').forEach((card) => {
-        card.addEventListener('click', () => {
-          const eventId = card.dataset.eventId;
-          if (!eventId) {
-            return;
-          }
+      if (this.directionFilter === 'sent') {
+        filtered = filtered.filter((e) => e.phase === 'sent' || (e.data.direction === 'outgoing'));
+      } else if (this.directionFilter === 'received') {
+        filtered = filtered.filter((e) => e.phase === 'message' || (e.data.direction === 'incoming'));
+      }
 
-          this.selectedEventId = this.selectedEventId === eventId ? undefined : eventId;
-          this.render();
+      if (this.filterText) {
+        const q = this.filterText.toLowerCase();
+        filtered = filtered.filter((e) => {
+          const preview = typeof e.data.preview === 'string' ? e.data.preview.toLowerCase() : '';
+          const payload = typeof e.data.payload === 'string' ? e.data.payload.toLowerCase() : '';
+          const url = typeof e.data.url === 'string' ? e.data.url.toLowerCase() : '';
+          return preview.includes(q) || payload.includes(q) || url.includes(q) || e.phase.includes(q);
         });
-      });
+      }
+
+      return filtered;
+    }
+
+    private renderDataColumn(event: WebSocketEvent): string {
+      const isFrame = event.phase === 'sent' || event.phase === 'message';
+      if (isFrame) {
+        const preview = typeof event.data.preview === 'string' ? event.data.preview : '';
+        return escapeHtml(preview.length > 200 ? preview.slice(0, 200) + '…' : preview);
+      }
+
+      if (event.phase === 'open') return '<span class="ws-phase-badge ws-phase-open">Connected</span>';
+      if (event.phase === 'closed') {
+        const label = closeCodeLabel(event.data.code);
+        return `<span class="ws-phase-badge ws-phase-closed">Closed${label ? ' — ' + escapeHtml(label) : ''}</span>`;
+      }
+      if (event.phase === 'error') return '<span class="ws-phase-badge ws-phase-error">Error</span>';
+      if (event.phase === 'created') return '<span class="ws-phase-badge">Created</span>';
+      if (event.phase === 'handshake-request') return '<span class="ws-phase-badge">Handshake</span>';
+      return escapeHtml(event.phase);
+    }
+
+    private renderDirectionColumn(event: WebSocketEvent): string {
+      if (event.phase === 'sent' || event.data.direction === 'outgoing') {
+        return '<span class="ws-arrow-up" title="Sent">↑</span>';
+      }
+      if (event.phase === 'message' || event.data.direction === 'incoming') {
+        return '<span class="ws-arrow-down" title="Received">↓</span>';
+      }
+      return '';
+    }
+
+    private renderDetailPanel(event: WebSocketEvent | undefined): string {
+      if (!event) {
+        return '<div class="ws-empty">Select a message to view details</div>';
+      }
+
+      const isFrame = event.phase === 'sent' || event.phase === 'message';
+      const hasHeaders = event.phase === 'handshake-request' || event.phase === 'open';
+      const hasBinary = typeof event.data.payloadBase64 === 'string';
+
+      const tabs: { id: string; label: string }[] = [];
+      if (isFrame) tabs.push({ id: 'payload', label: 'Payload' });
+      if (hasHeaders) tabs.push({ id: 'headers', label: 'Headers' });
+      tabs.push({ id: 'meta', label: 'Meta' });
+
+      const activeTab = tabs.find((t) => t.id === this.detailTab) ? this.detailTab : tabs[0]?.id ?? 'meta';
+
+      const tabHtml = tabs.map((t) =>
+        `<button class="ws-detail-tab${t.id === activeTab ? ' is-active' : ''}" data-tab="${t.id}">${t.label}${t.id === 'payload' && hasBinary ? ' (binary)' : ''}</button>`
+      ).join('');
+
+      let bodyHtml = '';
+      if (activeTab === 'payload') {
+        const detail = formatPayloadDetail(event.data);
+        bodyHtml = detail ? `<pre>${detail}</pre>` : '<div class="ws-empty">No payload</div>';
+      } else if (activeTab === 'headers') {
+        const detail = formatHeadersDetail(event.data);
+        bodyHtml = detail ? `<pre>${detail}</pre>` : '<div class="ws-empty">No headers</div>';
+      } else {
+        const meta = { ...event.data };
+        delete meta.payload;
+        delete meta.payloadBase64;
+        delete meta.payloadText;
+        delete meta.payloadHex;
+        delete meta.preview;
+        delete meta.headers;
+        delete meta.response;
+        const entries = Object.entries(meta).filter(([, v]) => v !== undefined && v !== null && v !== '');
+        bodyHtml = '<dl class="ws-detail-meta">' + entries.map(([k, v]) =>
+          `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(typeof v === 'object' ? JSON.stringify(v) : String(v))}</dd>`
+        ).join('') + '</dl>';
+        bodyHtml += `<br><dl class="ws-detail-meta">
+          <dt>socketId</dt><dd>${escapeHtml(event.socketId)}</dd>
+          <dt>phase</dt><dd>${escapeHtml(event.phase)}</dd>
+          <dt>timestamp</dt><dd>${escapeHtml(formatTimestamp(event.ts))}</dd>
+          <dt>pageUrl</dt><dd>${escapeHtml(event.pageUrl)}</dd>
+        </dl>`;
+      }
+
+      return `
+        <div class="ws-detail-tabs">${tabHtml}</div>
+        <div class="ws-detail-body">${bodyHtml}</div>
+      `;
     }
 
     init($el: unknown) {
@@ -293,313 +569,146 @@ export const createErudaWebSocketPlugin = () => (erudaApi: typeof eruda) => {
     }
 
     render() {
-      if (!this.panel) {
-        return;
-      }
+      if (!this.panel) return;
 
       const state = getInspectraWebSocketState();
-      const recent = [...state.websocketEvents].reverse();
+      const events = state.websocketEvents;
       const debuggerState = state.websocketDebugger;
-      const header = buildHeaderStats(state.websocketEvents)
-        .map(
-          ([label, value]) => `
-            <div class="inspectra-header-stat">
-              <span>${escapeHtml(label)}</span>
-              <strong>${escapeHtml(value)}</strong>
-            </div>
-          `
-        )
-        .join('');
-      const selectedEvent = state.websocketEvents.find((event) => event.id === this.selectedEventId);
-      const rows =
-        recent.length === 0
-          ? '<div class="inspectra-empty">No WebSocket activity yet.</div>'
-          : recent
-              .map((event) => {
-                const showDetails = this.expandAllDetails || this.selectedEventId === event.id;
-                const summary = summarizeEvent(event)
-                  .map(
-                    ([label, value]) => `
-                      <span class="inspectra-chip">
-                        <strong>${escapeHtml(label)}</strong>
-                        <span>${escapeHtml(value)}</span>
-                      </span>
-                    `
-                  )
-                  .join('');
-                const preview = summarizePreview(event.data);
+      const sockets = this.getSocketList(events);
 
-                return `
-                  <article
-                    class="inspectra-card${showDetails ? ' is-selected' : ''}"
-                    data-event-id="${escapeHtml(event.id)}"
-                  >
-                    <div class="inspectra-row">
-                      <strong>${escapeHtml(event.phase)}</strong>
-                      <span>${escapeHtml(formatTimestamp(event.ts))}</span>
-                    </div>
-                    <div class="inspectra-peer">${escapeHtml(formatMetric(event.data.url, event.socketId))}</div>
-                    ${summary ? `<div class="inspectra-chip-row">${summary}</div>` : ''}
-                    ${preview ? `<div class="inspectra-preview">${escapeHtml(preview)}</div>` : ''}
-                    <div class="inspectra-card-footer">
-                      <span>${showDetails ? 'Hide details' : 'Show details'}</span>
-                    </div>
-                    ${showDetails ? `<pre>${formatPayloadDetail(event.data)}</pre>` : ''}
-                  </article>
-                `;
-              })
-              .join('');
-      const toolbar = `
-        <div class="inspectra-toolbar">
-          <div class="inspectra-session">Session: ${escapeHtml(state.sessionId || 'N/A')}</div>
-          <label class="inspectra-toggle">
-            <input
-              type="checkbox"
-              data-role="expand-details"
-              ${this.expandAllDetails ? 'checked' : ''}
-            />
-            <span>Expand details</span>
-          </label>
-        </div>
-        <div class="inspectra-debugger-state is-${escapeHtml(debuggerState.status)}">
-          <strong>${escapeHtml(formatStatusLabel(debuggerState.status))}</strong>
-          <span>${escapeHtml(
-            debuggerState.message ??
-              'Inspectra uses the Chromium debugger API for WebSocket capture.'
-          )}</span>
-        </div>
-        <div class="inspectra-selection">
-          ${
-            selectedEvent
-              ? `Selected: ${escapeHtml(selectedEvent.phase)} at ${escapeHtml(
-                  formatTimestamp(selectedEvent.ts)
-                )}`
-              : 'Select an item to inspect the full payload metadata.'
-          }
-        </div>
-      `;
-      const viewportAnchor = this.captureViewportAnchor();
+      if (!this.selectedSocketId && sockets.length > 0) {
+        this.selectedSocketId = sockets[sockets.length - 1]!.socketId;
+      }
+
+      const selectedSocket = sockets.find((s) => s.socketId === this.selectedSocketId);
+      const messages = this.getFilteredMessages(events);
+      const selectedEvent = events.find((e) => e.id === this.selectedEventId);
+
+      /* ── connection selector ── */
+      const connOptions = sockets.length === 0
+        ? '<option>No connections</option>'
+        : sockets.map((s) => {
+            const label = s.url.replace(/^wss?:\/\//, '');
+            const sel = s.socketId === this.selectedSocketId ? ' selected' : '';
+            return `<option value="${escapeHtml(s.socketId)}"${sel}>${escapeHtml(label)} (${s.eventCount})</option>`;
+          }).join('');
+
+      /* ── table rows ── */
+      const tableRows = messages.length === 0
+        ? `<tr><td colspan="4" class="ws-empty">No messages${this.filterText ? ' matching filter' : ''}</td></tr>`
+        : messages.map((e) => {
+            const sel = e.id === this.selectedEventId ? ' is-selected' : '';
+            return `<tr class="${sel}" data-event-id="${escapeHtml(e.id)}">
+              <td class="ws-col-dir">${this.renderDirectionColumn(e)}</td>
+              <td class="ws-col-data">${this.renderDataColumn(e)}</td>
+              <td class="ws-col-size">${escapeHtml(formatSize(e.data.size))}</td>
+              <td class="ws-col-time">${escapeHtml(formatTimestamp(e.ts))}</td>
+            </tr>`;
+          }).join('');
+
+      /* ── detail ── */
+      const detail = this.selectedEventId ? this.renderDetailPanel(selectedEvent) : this.renderDetailPanel(undefined);
 
       this.panel.html(`
-        <div class="inspectra-websocket">
-          <style>
-            .inspectra-websocket {
-              height: 100%;
-              box-sizing: border-box;
-              display: flex;
-              flex-direction: column;
-              color: inherit;
-            }
-            .inspectra-header {
-              display: grid;
-              grid-template-columns: repeat(4, minmax(0, 1fr));
-              gap: 8px;
-              padding: 10px;
-              border-bottom: 1px solid rgba(127,127,127,0.2);
-              background: inherit;
-              position: sticky;
-              top: 0;
-              z-index: 2;
-            }
-            .inspectra-header-stat {
-              display: grid;
-              gap: 2px;
-              min-width: 0;
-            }
-            .inspectra-header-stat span {
-              opacity: 0.68;
-              font-size: 11px;
-            }
-            .inspectra-header-stat strong {
-              font-size: 12px;
-              overflow: hidden;
-              text-overflow: ellipsis;
-              white-space: nowrap;
-            }
-            .inspectra-scroll {
-              flex: 1;
-              min-height: 0;
-              overflow: auto;
-              box-sizing: border-box;
-              padding: 0 10px 10px;
-            }
-            .inspectra-toolbar {
-              display: flex;
-              align-items: center;
-              justify-content: space-between;
-              gap: 10px;
-              padding: 10px;
-              margin: 0 -10px;
-              border-bottom: 1px solid var(--border, rgba(127,127,127,0.2));
-              background: var(--darker-background, rgba(127,127,127,0.06));
-            }
-            .inspectra-session {
-              opacity: 0.72;
-              font-size: 12px;
-              word-break: break-word;
-            }
-            .inspectra-toggle {
-              display: inline-flex;
-              align-items: center;
-              gap: 6px;
-              font-size: 12px;
-              cursor: pointer;
-              user-select: none;
-              white-space: nowrap;
-            }
-            .inspectra-selection {
-              padding: 10px;
-              margin: 0 -10px 8px;
-              opacity: 0.72;
-              font-size: 12px;
-              border-bottom: 1px solid var(--border, rgba(127,127,127,0.2));
-            }
-            .inspectra-debugger-state {
-              display: grid;
-              gap: 4px;
-              padding: 10px;
-              margin: 0 -10px 8px;
-              border-bottom: 1px solid var(--border, rgba(127,127,127,0.2));
-              font-size: 12px;
-            }
-            .inspectra-debugger-state strong {
-              font-size: 12px;
-            }
-            .inspectra-debugger-state span {
-              opacity: 0.78;
-            }
-            .inspectra-debugger-state.is-attached strong {
-              color: #39b54a;
-            }
-            .inspectra-debugger-state.is-conflict strong,
-            .inspectra-debugger-state.is-error strong {
-              color: #ff5f56;
-            }
-            .inspectra-debugger-state.is-detached strong {
-              color: #f4b400;
-            }
-            .inspectra-card {
-              position: relative;
-              padding: 10px 12px;
-              margin-bottom: 12px;
-              border: 1px solid var(--border, rgba(127,127,127,0.28));
-              border-radius: 6px;
-              background: var(--background, transparent);
-              overflow: hidden;
-              cursor: pointer;
-              box-shadow: inset 0 0 0 1px rgba(127,127,127,0.05);
-            }
-            .inspectra-card.is-selected {
-              background: rgba(127,127,127,0.12);
-              border-color: var(--accent, rgba(127,127,127,0.35));
-              box-shadow:
-                0 0 0 1px var(--accent, rgba(127,127,127,0.28)),
-                inset 0 0 0 1px rgba(127,127,127,0.16);
-            }
-            .inspectra-row {
-              display: flex;
-              justify-content: space-between;
-              gap: 8px;
-              margin-bottom: 6px;
-              padding-bottom: 6px;
-              border-bottom: 1px solid rgba(127,127,127,0.14);
-              align-items: baseline;
-            }
-            .inspectra-row strong {
-              color: var(--primary, inherit);
-              font-size: 12px;
-              font-weight: 600;
-              text-transform: capitalize;
-            }
-            .inspectra-row span {
-              font-size: 11px;
-              opacity: 0.72;
-            }
-            .inspectra-peer {
-              font-size: 12px;
-              opacity: 0.78;
-              margin-bottom: 6px;
-              padding-bottom: 6px;
-              border-bottom: 1px solid rgba(127,127,127,0.14);
-              word-break: break-word;
-            }
-            .inspectra-chip-row {
-              display: flex;
-              flex-wrap: wrap;
-              gap: 6px;
-              margin-bottom: 6px;
-              padding-bottom: 6px;
-              border-bottom: 1px solid rgba(127,127,127,0.14);
-            }
-            .inspectra-chip {
-              display: inline-flex;
-              gap: 7px;
-              align-items: center;
-              padding: 2px 6px;
-              border-radius: 999px;
-              border: 1px solid var(--border, rgba(127,127,127,0.18));
-              background: var(--darker-background, rgba(127,127,127,0.06));
-              font-size: 10px;
-              box-sizing: border-box;
-            }
-            .inspectra-chip strong {
-              opacity: 0.72;
-              font-weight: 500;
-              font-size: 10px;
-              letter-spacing: 0.01em;
-              text-transform: lowercase;
-            }
-            .inspectra-chip span {
-              font-size: 10px;
-              font-weight: 400;
-            }
-            .inspectra-preview {
-              margin-bottom: 6px;
-              padding-bottom: 6px;
-              border-bottom: 1px solid rgba(127,127,127,0.14);
-              font-size: 11px;
-              opacity: 0.78;
-              word-break: break-word;
-            }
-            .inspectra-card-footer {
-              margin-top: 2px;
-              margin-bottom: 0;
-              opacity: 0.68;
-              font-size: 11px;
-              color: var(--primary, inherit);
-            }
-            .inspectra-websocket pre {
-              margin: 6px 0 0;
-              white-space: pre-wrap;
-              word-break: break-word;
-              font-size: 11px;
-              line-height: 1.45;
-              max-height: 400px;
-              overflow: auto;
-              padding: 10px;
-              border-bottom: 1px solid var(--border, rgba(127,127,127,0.2));
-              color: var(--foreground, inherit);
-              background: var(--background, transparent);
-            }
-            .inspectra-empty {
-              padding: 10px;
-              opacity: 0.72;
-              font-size: 12px;
-            }
-          </style>
-          <div class="inspectra-header">${header}</div>
-          <div class="inspectra-scroll">
-            ${toolbar}
-            ${rows}
+        <div class="ws-root">
+          <style>${CSS}</style>
+
+          <div class="ws-toolbar">
+            <input class="ws-filter-input" type="text" placeholder="Filter messages…" value="${escapeHtml(this.filterText)}" data-role="filter" />
+            <button class="ws-dir-btn${this.directionFilter === 'all' ? ' is-active' : ''}" data-dir="all">All</button>
+            <button class="ws-dir-btn${this.directionFilter === 'sent' ? ' is-active' : ''}" data-dir="sent">↑ Sent</button>
+            <button class="ws-dir-btn${this.directionFilter === 'received' ? ' is-active' : ''}" data-dir="received">↓ Recv</button>
+          </div>
+
+          <div class="ws-debugger is-${escapeHtml(debuggerState.status)}">
+            <span class="ws-debugger-dot"></span>
+            <span>${escapeHtml(formatStatusLabel(debuggerState.status))}</span>
+          </div>
+
+          <div class="ws-conn-bar">
+            <span class="ws-conn-status ${selectedSocket?.open ? 'is-open' : 'is-closed'}"></span>
+            <select class="ws-conn-select" data-role="conn-select">${connOptions}</select>
+            <span class="ws-conn-count">${sockets.length} conn</span>
+          </div>
+
+          <div class="ws-body">
+            <div class="ws-table-wrap" data-role="table-wrap">
+              <table class="ws-table">
+                <thead>
+                  <tr>
+                    <th class="ws-col-dir"></th>
+                    <th class="ws-col-data">Data</th>
+                    <th class="ws-col-size">Size</th>
+                    <th class="ws-col-time">Time</th>
+                  </tr>
+                </thead>
+                <tbody>${tableRows}</tbody>
+              </table>
+            </div>
+
+            <div class="ws-detail" data-role="detail">
+              ${detail}
+            </div>
           </div>
         </div>
       `);
 
-      requestAnimationFrame(() => {
-        this.bindScrollState();
-        this.restoreViewportAnchor(viewportAnchor);
-        this.bindInteractionState();
+      requestAnimationFrame(() => this.bindEvents());
+    }
+
+    private bindEvents() {
+      const root = document.querySelector('.ws-root');
+      if (!root) return;
+
+      /* filter input */
+      const filterInput = root.querySelector('[data-role="filter"]') as HTMLInputElement | null;
+      filterInput?.addEventListener('input', () => {
+        this.filterText = filterInput.value;
+        this.render();
       });
+
+      /* direction buttons */
+      root.querySelectorAll<HTMLElement>('[data-dir]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          this.directionFilter = (btn.dataset.dir ?? 'all') as DirectionFilter;
+          this.render();
+        });
+      });
+
+      /* connection select */
+      const connSelect = root.querySelector('[data-role="conn-select"]') as HTMLSelectElement | null;
+      connSelect?.addEventListener('change', () => {
+        this.selectedSocketId = connSelect.value;
+        this.selectedEventId = null;
+        this.render();
+      });
+
+      /* table row clicks */
+      root.querySelectorAll<HTMLElement>('tr[data-event-id]').forEach((row) => {
+        row.addEventListener('click', () => {
+          const id = row.dataset.eventId!;
+          this.selectedEventId = this.selectedEventId === id ? null : id;
+          this.detailTab = 'payload';
+          this.render();
+        });
+      });
+
+      /* detail tabs */
+      root.querySelectorAll<HTMLElement>('[data-tab]').forEach((tab) => {
+        tab.addEventListener('click', () => {
+          this.detailTab = tab.dataset.tab as 'payload' | 'headers' | 'meta';
+          this.render();
+        });
+      });
+
+      /* restore table scroll */
+      const tableWrap = root.querySelector('[data-role="table-wrap"]') as HTMLElement | null;
+      if (tableWrap) {
+        tableWrap.scrollTop = this.tableScrollTop;
+        tableWrap.addEventListener('scroll', () => {
+          this.tableScrollTop = tableWrap.scrollTop;
+        }, { passive: true });
+      }
     }
 
     show() {
@@ -614,7 +723,6 @@ export const createErudaWebSocketPlugin = () => (erudaApi: typeof eruda) => {
 
     destroy() {
       window.removeEventListener(INSPECTRA_WEBSOCKET_EVENT, this.onUpdate);
-      this.scrollBoundElement?.removeEventListener('scroll', this.onScroll);
       super.destroy();
     }
   }
