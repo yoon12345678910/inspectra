@@ -42,6 +42,7 @@ interface InspectraAgentGlobal {
   websocketDebugger: WebSocketDebuggerState;
   messageListenerInstalled: boolean;
   onEvent?: (event: { type: 'websocket' | 'webrtc' | 'media' | 'debugger-status'; data: unknown }) => void;
+  OriginalWebSocket?: typeof WebSocket;
 }
 
 declare global {
@@ -659,6 +660,7 @@ const installWebSocketHook = () => {
   }
 
   const OriginalSocket = window.WebSocket;
+  getAgent().OriginalWebSocket = OriginalSocket;
   class InspectraWebSocket extends OriginalSocket {
     static __INSPECTRA_WRAPPED__ = true;
 

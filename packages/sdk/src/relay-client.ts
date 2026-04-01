@@ -47,7 +47,8 @@ export class RelayClient {
 
     this.opts.onStatusChange?.('connecting');
 
-    const ws = new WebSocket(this.opts.url);
+    const NativeWebSocket = (window as unknown as { __INSPECTRA_AGENT__?: { OriginalWebSocket?: typeof WebSocket } }).__INSPECTRA_AGENT__?.OriginalWebSocket ?? WebSocket;
+    const ws = new NativeWebSocket(this.opts.url);
     this.ws = ws;
 
     ws.addEventListener('open', () => {
