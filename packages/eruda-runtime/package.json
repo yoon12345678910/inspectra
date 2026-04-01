@@ -14,6 +14,7 @@
     "@inspectra/eruda-plugin-media-permissions": "workspace:*",
     "@inspectra/eruda-plugin-webrtc": "workspace:*",
     "@inspectra/eruda-plugin-websocket": "workspace:*",
+    "@inspectra/eruda-plugin-remote": "workspace:*",
     "eruda": "^3.4.3"
   }
 }

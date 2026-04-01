@@ -2,7 +2,18 @@ import { bootstrapInspectraAgent } from '@inspectra/agent-main';
 import { createErudaMediaPermissionsPlugin } from '@inspectra/eruda-plugin-media-permissions';
 import { createErudaWebRtcPlugin } from '@inspectra/eruda-plugin-webrtc';
 import { createErudaWebSocketPlugin } from '@inspectra/eruda-plugin-websocket';
-import { RelayClient } from './relay-client';
+import {
+  createErudaRemotePlugin,
+  getRemoteState,
+  updateRemoteState,
+  pushConsoleEntry,
+  pushRemoteWebSocketEvent,
+  pushRemoteWebRtcEvent,
+  type RemoteCommand,
+  type ConsoleEntry
+} from '@inspectra/eruda-plugin-remote';
+import { RelayClient, type RelayMessage } from './relay-client';
+import { handleRemoteCommand, installConsoleStream, sendDeviceInfo, createId } from './remote-handler';
 
 export type { RelayMessage, RelayClientOptions } from './relay-client';
 
@@ -18,6 +29,7 @@ interface InspectraState {
   sessionId: string;
   relay: RelayClient | null;
   erudaLoaded: boolean;
+  cleanupConsoleStream: (() => void) | null;
 }
 
 const ERUDA_CDN = 'https://cdn.jsdelivr.net/npm/eruda';
@@ -30,7 +42,8 @@ const getState = (): InspectraState => {
       initialized: false,
       sessionId: '',
       relay: null,
-      erudaLoaded: false
+      erudaLoaded: false,
+      cleanupConsoleStream: null
     };
   }
   return win[GLOBAL_KEY] as InspectraState;
@@ -74,9 +87,67 @@ const initEruda = (sessionId: string, plugins: boolean) => {
     eruda.add(createErudaWebSocketPlugin());
   }
 
+  eruda.add(createErudaRemotePlugin());
+
   eruda.get('info')?.add('Inspectra Session', () => sessionId);
   eruda.get('info')?.add('Inspectra Runtime', 'SDK');
   eruda.show();
+};
+
+const handleRelayEvent = (msg: RelayMessage, state: InspectraState) => {
+  const remote = getRemoteState();
+
+  switch (msg.kind) {
+    case 'websocket':
+      pushRemoteWebSocketEvent(msg.payload);
+      break;
+    case 'webrtc':
+      pushRemoteWebRtcEvent(msg.payload);
+      break;
+    case 'media':
+      updateRemoteState({ mediaPermissions: msg.payload });
+      break;
+    case 'device-info':
+      updateRemoteState({ deviceInfo: msg.payload as typeof remote.deviceInfo });
+      break;
+    case 'console-stream':
+      pushConsoleEntry(msg.payload as ConsoleEntry);
+      break;
+    case 'remote-command': {
+      const cmd = msg.payload as RemoteCommand;
+      const response = handleRemoteCommand(cmd);
+      state.relay?.sendEvent('remote-response', response);
+      break;
+    }
+    case 'remote-response': {
+      const resp = msg.payload as { id: string; success: boolean; result?: unknown; error?: string };
+      // Match to pending eval
+      if (resp.result && typeof resp.result === 'object' && 'type' in (resp.result as Record<string, unknown>)) {
+        const r = resp.result as Record<string, unknown>;
+        if (r.type === 'localStorage' || r.type === 'sessionStorage' || r.type === 'cookie') {
+          updateRemoteState({ storageData: resp.result as typeof remote.storageData });
+          break;
+        }
+      }
+      if (Array.isArray(resp.result)) {
+        updateRemoteState({ networkRequests: resp.result as unknown[] });
+        break;
+      }
+      // Eval response
+      const evalEntry = {
+        input: (remote as unknown as { _pendingEval?: string })._pendingEval ?? '',
+        output: resp.success ? String(resp.result ?? '') : String(resp.error ?? 'Error'),
+        success: resp.success,
+        ts: Date.now()
+      };
+      remote.evalHistory.push(evalEntry);
+      if (remote.evalHistory.length > 50) remote.evalHistory.shift();
+      updateRemoteState({});
+      break;
+    }
+    default:
+      break;
+  }
 };
 
 const connectRelay = (state: InspectraState, url: string, room: string) => {
@@ -86,25 +157,92 @@ const connectRelay = (state: InspectraState, url: string, room: string) => {
     url,
     room,
     onStatusChange: (status) => {
-      if (typeof console !== 'undefined') {
-        console.log(`[Inspectra Relay] ${status}`);
+      const remote = getRemoteState();
+      updateRemoteState({ connected: status === 'connected' });
+      if (status === 'connected') {
+        sendDeviceInfo(state.relay!);
+        state.cleanupConsoleStream = installConsoleStream(state.relay!);
+      }
+      if (status === 'disconnected' && state.cleanupConsoleStream) {
+        state.cleanupConsoleStream();
+        state.cleanupConsoleStream = null;
       }
     },
     onPeerCount: (count) => {
-      if (typeof console !== 'undefined') {
-        console.log(`[Inspectra Relay] peers in room: ${count}`);
-      }
+      updateRemoteState({ peerCount: count });
+    },
+    onEvent: (msg) => {
+      handleRelayEvent(msg, state);
     }
   });
+
+  // Expose relay for plugin access
+  (window as unknown as Record<string, unknown>).__INSPECTRA_RELAY__ = state.relay;
+  (window as unknown as Record<string, unknown>).__INSPECTRA_RELAY_URL__ = url;
 
   if (agent) {
     agent.onEvent = (event) => {
       state.relay?.sendEvent(
-        event.type as 'websocket' | 'webrtc' | 'media' | 'debugger-status',
+        event.type as RelayMessage['kind'],
         event.data
       );
     };
   }
+};
+
+const setupRemoteEventListeners = (state: InspectraState) => {
+  window.addEventListener('inspectra:remote:connect', ((e: CustomEvent) => {
+    const { code, role } = e.detail as { code: string; role: string };
+    const remote = getRemoteState();
+    remote.role = role as 'source' | 'viewer';
+    const relayUrl = String((window as unknown as Record<string, unknown>).__INSPECTRA_RELAY_URL__ ?? '');
+    if (!relayUrl) return;
+    if (state.relay) {
+      state.relay.changeRoom(`inspectra-${code}`);
+    } else {
+      connectRelay(state, relayUrl, `inspectra-${code}`);
+    }
+    updateRemoteState({ role: role as 'source' | 'viewer' });
+  }) as EventListener);
+
+  window.addEventListener('inspectra:remote:disconnect', () => {
+    state.relay?.destroy();
+    state.relay = null;
+    (window as unknown as Record<string, unknown>).__INSPECTRA_RELAY__ = null;
+    if (state.cleanupConsoleStream) {
+      state.cleanupConsoleStream();
+      state.cleanupConsoleStream = null;
+    }
+    updateRemoteState({
+      connected: false,
+      peerCount: 0,
+      role: 'idle',
+      deviceInfo: null,
+      consoleEntries: [],
+      websocketEvents: [],
+      webrtcEvents: [],
+      mediaPermissions: null,
+      storageData: null,
+      networkRequests: []
+    });
+  });
+
+  window.addEventListener('inspectra:remote:command', ((e: CustomEvent) => {
+    const detail = e.detail as { command: string; params?: Record<string, unknown> };
+    const cmd: RemoteCommand = {
+      id: createId(),
+      command: detail.command as RemoteCommand['command'],
+      params: detail.params
+    };
+
+    // Track pending eval for response matching
+    if (cmd.command === 'eval') {
+      const remote = getRemoteState();
+      (remote as unknown as Record<string, unknown>)._pendingEval = String(cmd.params?.code ?? '');
+    }
+
+    state.relay?.sendEvent('remote-command', cmd);
+  }) as EventListener);
 };
 
 export const Inspectra = {
@@ -123,9 +261,14 @@ export const Inspectra = {
     state.initialized = true;
 
     bootstrapInspectraAgent();
+    setupRemoteEventListeners(state);
 
     if (relay) {
-      connectRelay(state, relay, room ?? location.hostname);
+      (window as unknown as Record<string, unknown>).__INSPECTRA_RELAY_URL__ = relay;
+      const remoteState = getRemoteState();
+      const effectiveRoom = room ?? `inspectra-${remoteState.pairingCode}`;
+      remoteState.role = 'source';
+      connectRelay(state, relay, effectiveRoom);
     }
 
     if (enableEruda) {
@@ -144,6 +287,11 @@ export const Inspectra = {
     state.relay?.destroy();
     state.relay = null;
     state.initialized = false;
+
+    if (state.cleanupConsoleStream) {
+      state.cleanupConsoleStream();
+      state.cleanupConsoleStream = null;
+    }
 
     const agent = (window as unknown as { __INSPECTRA_AGENT__?: { onEvent?: unknown } }).__INSPECTRA_AGENT__;
     if (agent) {
@@ -166,11 +314,10 @@ export const Inspectra = {
   },
 
   get isConnected() {
-    return getState().relay !== null;
+    return getState().relay?.connected ?? false;
   }
 };
 
-// Auto-expose for script tag usage
 if (typeof window !== 'undefined') {
   (window as unknown as { Inspectra: typeof Inspectra }).Inspectra = Inspectra;
 }

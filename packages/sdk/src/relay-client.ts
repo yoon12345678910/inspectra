@@ -1,7 +1,15 @@
 export interface RelayMessage {
   type: 'join' | 'event' | 'peer-count';
   room?: string;
-  kind?: 'websocket' | 'webrtc' | 'media' | 'debugger-status';
+  kind?:
+    | 'websocket'
+    | 'webrtc'
+    | 'media'
+    | 'debugger-status'
+    | 'remote-command'
+    | 'remote-response'
+    | 'device-info'
+    | 'console-stream';
   payload?: unknown;
   count?: number;
 }
@@ -28,6 +36,10 @@ export class RelayClient {
   constructor(opts: RelayClientOptions) {
     this.opts = opts;
     this.connect();
+  }
+
+  get connected() {
+    return this.ws?.readyState === WebSocket.OPEN;
   }
 
   private connect() {
@@ -83,6 +95,12 @@ export class RelayClient {
 
   sendEvent(kind: RelayMessage['kind'], payload: unknown) {
     this.send({ type: 'event', kind, payload });
+  }
+
+  changeRoom(room: string) {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.send({ type: 'join', room });
+    }
   }
 
   destroy() {

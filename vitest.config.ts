@@ -17,7 +17,8 @@ export default defineConfig({
         __dirname,
         'packages/eruda-plugin-webrtc/src/index.ts'
       ),
-      '@inspectra/sdk': path.resolve(__dirname, 'packages/sdk/src/index.ts')
+      '@inspectra/sdk': path.resolve(__dirname, 'packages/sdk/src/index.ts'),
+      '@inspectra/eruda-plugin-remote': path.resolve(__dirname, 'packages/eruda-plugin-remote/src/index.ts')
     }
   }
 });
