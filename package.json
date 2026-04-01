@@ -8,11 +8,13 @@
     "dev": "pnpm --filter @inspectra/extension dev",
     "build": "pnpm --filter @inspectra/extension build",
     "build:bookmarklet": "node scripts/build-bookmarklet.mjs",
+    "preview:bookmarklet": "node scripts/preview-bookmarklet.mjs",
     "zip": "pnpm --filter @inspectra/extension zip",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
-    "lint": "pnpm run typecheck"
+    "lint": "pnpm run typecheck",
+    "relay": "pnpm --filter @inspectra/relay start"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

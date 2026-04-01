@@ -6,7 +6,29 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
 const outDir = path.join(rootDir, 'dist', 'bookmarklet');
 const entryFile = path.join(rootDir, 'apps', 'bookmarklet', 'src', 'index.ts');
-const bookmarkletUrl = process.env.INSPECTRA_BOOKMARKLET_URL ?? '__INSPECTRA_BOOKMARKLET_URL__';
+
+const loadDotEnv = async () => {
+  try {
+    const content = await readFile(path.join(rootDir, '.env'), 'utf8');
+    for (const line of content.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const eqIdx = trimmed.indexOf('=');
+      if (eqIdx < 0) continue;
+      const key = trimmed.slice(0, eqIdx).trim();
+      const value = trimmed.slice(eqIdx + 1).trim();
+      if (!process.env[key]) {
+        process.env[key] = value;
+      }
+    }
+  } catch {
+    // .env is optional
+  }
+};
+
+const bookmarkletUrl = () => process.env.INSPECTRA_BOOKMARKLET_URL ?? '__INSPECTRA_BOOKMARKLET_URL__';
+const relayUrl = () => process.env.INSPECTRA_RELAY_URL ?? '__INSPECTRA_RELAY_URL__';
+const relayRoom = () => process.env.INSPECTRA_RELAY_ROOM ?? '__INSPECTRA_RELAY_ROOM__';
 
 const findEsbuild = async () => {
   const pnpmDir = path.join(rootDir, 'node_modules', '.pnpm');
@@ -23,10 +45,11 @@ const findEsbuild = async () => {
 };
 
 const writeBookmarkletFiles = async () => {
-  const template = `javascript:(function(){var w=window;if(w.__inspectraBookmarkletLaunch){w.__inspectraBookmarkletLaunch();return;}var d=document,s=d.createElement('script');s.src='${bookmarkletUrl}?t='+Date.now();s.async=true;d.documentElement.appendChild(s);}());`;
+  const url = bookmarkletUrl();
+  const template = `javascript:(function(){var w=window;if(w.__inspectraBookmarkletLaunch){w.__inspectraBookmarkletLaunch();return;}var d=document,s=d.createElement('script');s.src='${url}?t='+Date.now();s.async=true;d.documentElement.appendChild(s);}());`;
   await writeFile(path.join(outDir, 'BOOKMARKLET.template.txt'), `${template}\n`, 'utf8');
 
-  if (bookmarkletUrl !== '__INSPECTRA_BOOKMARKLET_URL__') {
+  if (url !== '__INSPECTRA_BOOKMARKLET_URL__') {
     await writeFile(path.join(outDir, 'BOOKMARKLET.txt'), `${template}\n`, 'utf8');
   }
 
@@ -35,6 +58,7 @@ const writeBookmarkletFiles = async () => {
 };
 
 const main = async () => {
+  await loadDotEnv();
   await mkdir(outDir, { recursive: true });
   const { build } = await findEsbuild();
 
@@ -50,6 +74,10 @@ const main = async () => {
     sourcemap: false,
     minify: true,
     logLevel: 'info',
+    define: {
+      __INSPECTRA_RELAY_URL__: JSON.stringify(relayUrl()),
+      __INSPECTRA_RELAY_ROOM__: JSON.stringify(relayRoom())
+    },
     banner: {
       js: '/* Inspectra bookmarklet bundle */'
     }

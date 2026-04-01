@@ -4,6 +4,7 @@ import { defineBackground } from 'wxt/utils/define-background';
 const TOGGLE_MESSAGE = 'inspectra:toggle-overlay';
 const REGISTER_DEBUGGER_MESSAGE = 'inspectra:register-debugger-target';
 const WEBSOCKET_DEBUGGER_EVENT = 'inspectra:websocket-debugger-event';
+const WEBSOCKET_DEBUGGER_STATUS = 'inspectra:websocket-debugger-status';
 const DEBUGGER_VERSION = '1.3';
 
 type DebuggeeTarget = {
@@ -81,8 +82,33 @@ const sendWebSocketEvent = async (tabId: number, payload: DebuggerWebSocketPaylo
   }
 };
 
+const sendDebuggerStatus = async (
+  tabId: number,
+  payload: {
+    status: 'idle' | 'attached' | 'detached' | 'error' | 'conflict';
+    message?: string;
+    ts?: number;
+  }
+) => {
+  try {
+    await browser.tabs.sendMessage(tabId, {
+      type: WEBSOCKET_DEBUGGER_STATUS,
+      payload: {
+        ...payload,
+        ts: payload.ts ?? Date.now()
+      }
+    });
+  } catch {
+    return;
+  }
+};
+
 const attachDebugger = async (tabId: number) => {
   if (attachedTabs.has(tabId)) {
+    await sendDebuggerStatus(tabId, {
+      status: 'attached',
+      message: 'Debugger attached and Network domain enabled.'
+    });
     return;
   }
 
@@ -92,9 +118,18 @@ const attachDebugger = async (tabId: number) => {
     await chrome.debugger.attach(target, DEBUGGER_VERSION);
     await chrome.debugger.sendCommand(target, 'Network.enable');
     attachedTabs.add(tabId);
+    await sendDebuggerStatus(tabId, {
+      status: 'attached',
+      message: 'Debugger attached and Network domain enabled.'
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (!message.includes('Another debugger is already attached')) {
+    const isConflict = message.includes('Another debugger is already attached');
+    await sendDebuggerStatus(tabId, {
+      status: isConflict ? 'conflict' : 'error',
+      message
+    });
+    if (!isConflict) {
       console.warn('Inspectra could not attach debugger for WebSocket capture.', error);
     }
   }
@@ -243,5 +278,9 @@ export default defineBackground(() => {
     }
 
     attachedTabs.delete(source.tabId);
+    void sendDebuggerStatus(source.tabId, {
+      status: 'detached',
+      message: 'Debugger detached from tab.'
+    });
   });
 });

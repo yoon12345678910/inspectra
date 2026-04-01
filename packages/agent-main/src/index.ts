@@ -12,12 +12,15 @@ import {
 } from '@inspectra/eruda-plugin-media-permissions';
 import {
   INSPECTRA_WEBSOCKET_EVENT,
+  type WebSocketDebuggerState,
   type WebSocketEvent
 } from '@inspectra/eruda-plugin-websocket';
 
 const BRIDGE_CHANNEL = 'inspectra:bridge';
 const AGENT_RELAY_CHANNEL = 'inspectra:agent-relay';
 const MAX_EVENT_HISTORY = 200;
+const MAX_TEXT_PAYLOAD_CAPTURE = 16_384;
+const MAX_BINARY_PAYLOAD_CAPTURE = 8_192;
 
 interface AgentState {
   bootstrapped: boolean;
@@ -28,11 +31,23 @@ interface AgentState {
 interface InspectraRuntimeState extends InspectraMediaPermissionsState {
   webrtcEvents: WebRtcEvent[];
   websocketEvents: WebSocketEvent[];
+  websocketDebugger: WebSocketDebuggerState;
+}
+
+interface InspectraAgentGlobal {
+  state: AgentState;
+  webrtcBuffer: RingBuffer<WebRtcEvent>;
+  websocketBuffer: RingBuffer<WebSocketEvent>;
+  mediaPermissions: MediaPermissionSnapshot;
+  websocketDebugger: WebSocketDebuggerState;
+  messageListenerInstalled: boolean;
+  onEvent?: (event: { type: 'websocket' | 'webrtc' | 'media' | 'debugger-status'; data: unknown }) => void;
 }
 
 declare global {
   interface Window {
     __INSPECTRA_ERUDA_STATE__?: Record<string, unknown>;
+    __INSPECTRA_AGENT__?: InspectraAgentGlobal;
   }
 }
 
@@ -51,6 +66,20 @@ class RingBuffer<T> {
   }
 }
 
+const getAgent = (): InspectraAgentGlobal => {
+  if (!window.__INSPECTRA_AGENT__) {
+    window.__INSPECTRA_AGENT__ = {
+      state: { bootstrapped: false, hooksInstalled: false, sessionId: '' },
+      webrtcBuffer: new RingBuffer<WebRtcEvent>(),
+      websocketBuffer: new RingBuffer<WebSocketEvent>(),
+      mediaPermissions: createDefaultMediaPermissionSnapshot(),
+      websocketDebugger: { status: 'idle' },
+      messageListenerInstalled: false
+    };
+  }
+  return window.__INSPECTRA_AGENT__;
+};
+
 const createId = () =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
@@ -62,6 +91,14 @@ const isTopLevelWindow = () => {
   } catch {
     return false;
   }
+};
+
+const uint8ToBase64 = (bytes: Uint8Array): string => {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
 };
 
 const isBootstrapMessage = (
@@ -105,6 +142,24 @@ const isDebuggerWebSocketMessage = (
   (value as { source?: string }).source === 'inspectra-content' &&
   (value as { type?: string }).type === 'websocket:debugger-event';
 
+const isDebuggerWebSocketStatusMessage = (
+  value: unknown
+): value is {
+  channel: string;
+  source: 'inspectra-content';
+  type: 'websocket:debugger-status';
+  payload: {
+    status: 'idle' | 'attached' | 'detached' | 'error' | 'conflict';
+    message?: string;
+    ts?: number;
+  };
+} =>
+  typeof value === 'object' &&
+  value !== null &&
+  (value as { channel?: string }).channel === BRIDGE_CHANNEL &&
+  (value as { source?: string }).source === 'inspectra-content' &&
+  (value as { type?: string }).type === 'websocket:debugger-status';
+
 const isAgentRelayMessage = (
   value: unknown
 ): value is {
@@ -120,20 +175,10 @@ const isAgentRelayMessage = (
   (value as { channel?: string }).channel === AGENT_RELAY_CHANNEL &&
   (value as { source?: string }).source === 'inspectra-agent';
 
-const state: AgentState = {
-  bootstrapped: false,
-  hooksInstalled: false,
-  sessionId: ''
-};
-
-const webrtcBuffer = new RingBuffer<WebRtcEvent>();
-const websocketBuffer = new RingBuffer<WebSocketEvent>();
-let mediaPermissions = createDefaultMediaPermissionSnapshot();
-
 const baseEvent = () => ({
   id: createId(),
   ts: Date.now(),
-  sessionId: state.sessionId,
+  sessionId: getAgent().state.sessionId,
   pageUrl: location.href
 });
 
@@ -141,6 +186,7 @@ const syncRuntimeState = (next?: {
   webrtcEvent?: WebRtcEvent;
   websocketEvent?: WebSocketEvent;
   mediaPermissions?: MediaPermissionSnapshot;
+  websocketDebugger?: WebSocketDebuggerState;
 }) => {
   if (!isTopLevelWindow() && (next?.webrtcEvent || next?.websocketEvent)) {
     window.top?.postMessage(
@@ -157,23 +203,30 @@ const syncRuntimeState = (next?: {
     return;
   }
 
+  const agent = getAgent();
+
   if (next?.webrtcEvent) {
-    webrtcBuffer.push(next.webrtcEvent);
+    agent.webrtcBuffer.push(next.webrtcEvent);
   }
 
   if (next?.websocketEvent) {
-    websocketBuffer.push(next.websocketEvent);
+    agent.websocketBuffer.push(next.websocketEvent);
   }
 
   if (next?.mediaPermissions) {
-    mediaPermissions = next.mediaPermissions;
+    agent.mediaPermissions = next.mediaPermissions;
+  }
+
+  if (next?.websocketDebugger) {
+    agent.websocketDebugger = next.websocketDebugger;
   }
 
   const runtimeState: InspectraRuntimeState = {
-    sessionId: state.sessionId,
-    webrtcEvents: webrtcBuffer.toArray(),
-    websocketEvents: websocketBuffer.toArray(),
-    mediaPermissions
+    sessionId: agent.state.sessionId,
+    webrtcEvents: agent.webrtcBuffer.toArray(),
+    websocketEvents: agent.websocketBuffer.toArray(),
+    mediaPermissions: agent.mediaPermissions,
+    websocketDebugger: agent.websocketDebugger
   };
   window.__INSPECTRA_ERUDA_STATE__ = runtimeState as unknown as Record<string, unknown>;
 
@@ -185,8 +238,19 @@ const syncRuntimeState = (next?: {
     window.dispatchEvent(new CustomEvent(INSPECTRA_WEBSOCKET_EVENT));
   }
 
+  if (next?.websocketDebugger) {
+    window.dispatchEvent(new CustomEvent(INSPECTRA_WEBSOCKET_EVENT));
+  }
+
   if (next?.mediaPermissions) {
     window.dispatchEvent(new CustomEvent(INSPECTRA_MEDIA_PERMISSIONS_EVENT));
+  }
+
+  if (agent.onEvent) {
+    if (next?.webrtcEvent) agent.onEvent({ type: 'webrtc', data: next.webrtcEvent });
+    if (next?.websocketEvent) agent.onEvent({ type: 'websocket', data: next.websocketEvent });
+    if (next?.mediaPermissions) agent.onEvent({ type: 'media', data: next.mediaPermissions });
+    if (next?.websocketDebugger) agent.onEvent({ type: 'debugger-status', data: next.websocketDebugger });
   }
 };
 
@@ -239,10 +303,39 @@ const normalizeProtocols = (value?: string | string[]) => {
 
 const normalizePayload = (value: unknown) => {
   if (typeof value === 'string') {
+    const captured = value.length <= MAX_TEXT_PAYLOAD_CAPTURE;
     return {
       payloadType: 'text',
       size: value.length,
-      preview: value.slice(0, 160)
+      preview: value.slice(0, 160),
+      payload: captured ? value : value.slice(0, MAX_TEXT_PAYLOAD_CAPTURE),
+      truncated: !captured
+    };
+  }
+
+  if (value instanceof ArrayBuffer) {
+    const bytes = new Uint8Array(value.slice(0, MAX_BINARY_PAYLOAD_CAPTURE));
+    return {
+      payloadType: 'array-buffer',
+      size: value.byteLength,
+      preview: `<ArrayBuffer ${value.byteLength} bytes>`,
+      payloadBase64: uint8ToBase64(bytes),
+      truncated: value.byteLength > MAX_BINARY_PAYLOAD_CAPTURE
+    };
+  }
+
+  if (ArrayBuffer.isView(value)) {
+    const slice = new Uint8Array(
+      value.buffer,
+      value.byteOffset,
+      Math.min(value.byteLength, MAX_BINARY_PAYLOAD_CAPTURE)
+    );
+    return {
+      payloadType: 'typed-array',
+      size: value.byteLength,
+      preview: `<${value.constructor.name} ${value.byteLength} bytes>`,
+      payloadBase64: uint8ToBase64(slice),
+      truncated: value.byteLength > MAX_BINARY_PAYLOAD_CAPTURE
     };
   }
 
@@ -252,22 +345,6 @@ const normalizePayload = (value: unknown) => {
       size: value.size,
       mimeType: value.type || 'application/octet-stream',
       preview: `<Blob ${value.type || 'application/octet-stream'}>`
-    };
-  }
-
-  if (value instanceof ArrayBuffer) {
-    return {
-      payloadType: 'array-buffer',
-      size: value.byteLength,
-      preview: `<ArrayBuffer ${value.byteLength} bytes>`
-    };
-  }
-
-  if (ArrayBuffer.isView(value)) {
-    return {
-      payloadType: 'typed-array',
-      size: value.byteLength,
-      preview: `<${value.constructor.name} ${value.byteLength} bytes>`
     };
   }
 
@@ -298,10 +375,7 @@ const emitDebuggerWebSocketEvent = (payload: {
     ts: payload.timestamp ?? Date.now(),
     type: 'websocket',
     socketId: payload.requestId,
-    phase:
-      payload.phase === 'handshake-request'
-        ? 'created'
-        : payload.phase,
+    phase: payload.phase,
     data: {
       source: 'debugger',
       url: payload.url,
@@ -310,6 +384,20 @@ const emitDebuggerWebSocketEvent = (payload: {
   };
 
   syncRuntimeState({ websocketEvent: event });
+};
+
+const syncDebuggerWebSocketStatus = (payload: {
+  status: 'idle' | 'attached' | 'detached' | 'error' | 'conflict';
+  message?: string;
+  ts?: number;
+}) => {
+  syncRuntimeState({
+    websocketDebugger: {
+      status: payload.status,
+      message: payload.message,
+      lastUpdated: payload.ts ?? Date.now()
+    }
+  });
 };
 
 const installWebRtcHook = () => {
@@ -461,7 +549,7 @@ const refreshMediaPermissions = async (lastRequest?: MediaPermissionRequest) => 
       microphone,
       devices,
       lastUpdated: Date.now(),
-      lastRequest: lastRequest ?? mediaPermissions.lastRequest
+      lastRequest: lastRequest ?? getAgent().mediaPermissions.lastRequest
     }
   });
 };
@@ -535,8 +623,14 @@ const installWebSocketHook = () => {
     return;
   }
 
+  if ((window.WebSocket as unknown as { __INSPECTRA_WRAPPED__?: boolean }).__INSPECTRA_WRAPPED__) {
+    return;
+  }
+
   const OriginalSocket = window.WebSocket;
   class InspectraWebSocket extends OriginalSocket {
+    static __INSPECTRA_WRAPPED__ = true;
+
     readonly inspectraSocketId: string;
     readonly inspectraSocketUrl: string;
 
@@ -623,47 +717,58 @@ const installWebSocketHook = () => {
 };
 
 const installHooks = () => {
-  if (state.hooksInstalled) {
+  const agent = getAgent();
+  if (agent.state.hooksInstalled) {
     return;
   }
 
   installWebRtcHook();
   installMediaPermissionHook();
   installWebSocketHook();
-  state.hooksInstalled = true;
+  agent.state.hooksInstalled = true;
 };
 
 const bootstrap = (sessionId: string) => {
-  state.sessionId = sessionId;
+  const agent = getAgent();
+  agent.state.sessionId = sessionId;
   installHooks();
-  syncRuntimeState({ mediaPermissions });
+  syncRuntimeState({ mediaPermissions: agent.mediaPermissions });
 
-  if (state.bootstrapped) {
+  if (agent.state.bootstrapped) {
     return;
   }
 
-  state.bootstrapped = true;
+  agent.state.bootstrapped = true;
 };
 
-window.addEventListener('message', (event) => {
-  if (event.source !== window && isAgentRelayMessage(event.data)) {
-    syncRuntimeState(event.data.payload);
-    return;
-  }
+const agent = getAgent();
+if (!agent.messageListenerInstalled) {
+  agent.messageListenerInstalled = true;
+  window.addEventListener('message', (event) => {
+    if (event.source !== window && isAgentRelayMessage(event.data)) {
+      syncRuntimeState(event.data.payload);
+      return;
+    }
 
-  if (event.source === window && isDebuggerWebSocketMessage(event.data)) {
-    emitDebuggerWebSocketEvent(event.data.payload);
-    return;
-  }
+    if (event.source === window && isDebuggerWebSocketMessage(event.data)) {
+      emitDebuggerWebSocketEvent(event.data.payload);
+      return;
+    }
 
-  if (event.source !== window || !isBootstrapMessage(event.data)) {
-    return;
-  }
+    if (event.source === window && isDebuggerWebSocketStatusMessage(event.data)) {
+      syncDebuggerWebSocketStatus(event.data.payload);
+      return;
+    }
 
-  bootstrap(event.data.payload.sessionId);
-});
+    if (event.source !== window || !isBootstrapMessage(event.data)) {
+      return;
+    }
+
+    bootstrap(event.data.payload.sessionId);
+  });
+}
 
 export const bootstrapInspectraAgent = () => {
   installHooks();
-  syncRuntimeState({ mediaPermissions });
+  syncRuntimeState({ mediaPermissions: getAgent().mediaPermissions });
 };

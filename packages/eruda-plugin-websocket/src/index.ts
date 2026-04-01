@@ -10,8 +10,14 @@ export interface WebSocketEvent {
   sessionId: string;
   pageUrl: string;
   socketId: string;
-  phase: 'created' | 'open' | 'sent' | 'message' | 'error' | 'closed';
+  phase: 'created' | 'handshake-request' | 'open' | 'sent' | 'message' | 'error' | 'closed';
   data: Record<string, unknown>;
+}
+
+export interface WebSocketDebuggerState {
+  status: 'idle' | 'attached' | 'detached' | 'error' | 'conflict';
+  message?: string;
+  lastUpdated?: number;
 }
 
 type ErudaPanelElement = {
@@ -23,6 +29,7 @@ type ErudaPanelElement = {
 export interface InspectraWebSocketState {
   sessionId: string;
   websocketEvents: WebSocketEvent[];
+  websocketDebugger: WebSocketDebuggerState;
 }
 
 declare global {
@@ -66,16 +73,34 @@ const formatMetric = (value: unknown, fallback = 'N/A') => {
 
 const summarizeEvent = (event: WebSocketEvent) => {
   const data = event.data;
-  return [
+  const chips: [string, string][] = [
     ['phase', event.phase],
     ['direction', formatMetric(data.direction)],
     ['type', formatMetric(data.payloadType)],
     ['size', formatMetric(data.size)],
     ['state', formatMetric(data.readyState)],
     ['code', formatMetric(data.code)]
-  ]
+  ];
+
+  if (event.phase === 'handshake-request' && data.headers && typeof data.headers === 'object') {
+    chips.push(['headers', String(Object.keys(data.headers as Record<string, unknown>).length)]);
+  }
+
+  if (typeof data.opcode === 'number') {
+    chips.push(['opcode', String(data.opcode)]);
+  }
+
+  if (typeof data.mask === 'boolean') {
+    chips.push(['mask', data.mask ? 'yes' : 'no']);
+  }
+
+  if (data.truncated === true) {
+    chips.push(['truncated', 'yes']);
+  }
+
+  return chips
     .filter(([, value]) => value !== 'N/A')
-    .slice(0, 6);
+    .slice(0, 8);
 };
 
 const buildHeaderStats = (events: WebSocketEvent[]) => {
@@ -90,13 +115,52 @@ const buildHeaderStats = (events: WebSocketEvent[]) => {
   ];
 };
 
+const createDefaultDebuggerState = (): WebSocketDebuggerState => ({
+  status: 'idle'
+});
+
+const formatStatusLabel = (status: WebSocketDebuggerState['status']) => {
+  switch (status) {
+    case 'attached':
+      return 'Debugger attached';
+    case 'detached':
+      return 'Debugger detached';
+    case 'conflict':
+      return 'Debugger conflict';
+    case 'error':
+      return 'Debugger error';
+    default:
+      return 'Debugger idle';
+  }
+};
+
 const summarizePreview = (data: Record<string, unknown>) => {
   const preview = typeof data.preview === 'string' ? data.preview.trim() : '';
   if (!preview) {
     return '';
   }
 
-  return preview.length > 96 ? `${preview.slice(0, 96)}...` : preview;
+  return preview.length > 256 ? `${preview.slice(0, 256)}...` : preview;
+};
+
+const formatPayloadDetail = (data: Record<string, unknown>) => {
+  if (typeof data.payload === 'string') {
+    const meta = { ...data };
+    delete meta.payload;
+    delete meta.preview;
+    const metaBlock = formatData(meta);
+    return `${metaBlock}\n\n── payload ──\n${escapeHtml(data.payload)}${data.truncated ? '\n... (truncated)' : ''}`;
+  }
+
+  if (typeof data.payloadBase64 === 'string') {
+    const meta = { ...data };
+    delete meta.payloadBase64;
+    delete meta.preview;
+    const metaBlock = formatData(meta);
+    return `${metaBlock}\n\n── payload (base64) ──\n${escapeHtml(data.payloadBase64 as string)}${data.truncated ? '\n... (truncated)' : ''}`;
+  }
+
+  return formatData(data);
 };
 
 export const getInspectraWebSocketState = (): InspectraWebSocketState => {
@@ -105,7 +169,11 @@ export const getInspectraWebSocketState = (): InspectraWebSocketState => {
     sessionId: typeof store.sessionId === 'string' ? store.sessionId : '',
     websocketEvents: Array.isArray(store.websocketEvents)
       ? (store.websocketEvents as WebSocketEvent[])
-      : []
+      : [],
+    websocketDebugger:
+      typeof store.websocketDebugger === 'object' && store.websocketDebugger !== null
+        ? (store.websocketDebugger as WebSocketDebuggerState)
+        : createDefaultDebuggerState()
   };
 };
 
@@ -212,6 +280,7 @@ export const createErudaWebSocketPlugin = () => (erudaApi: typeof eruda) => {
 
       const state = getInspectraWebSocketState();
       const recent = [...state.websocketEvents].reverse();
+      const debuggerState = state.websocketDebugger;
       const header = buildHeaderStats(state.websocketEvents)
         .map(
           ([label, value]) => `
@@ -256,7 +325,7 @@ export const createErudaWebSocketPlugin = () => (erudaApi: typeof eruda) => {
                     <div class="inspectra-card-footer">
                       <span>${showDetails ? 'Hide details' : 'Show details'}</span>
                     </div>
-                    ${showDetails ? `<pre>${formatData(event.data)}</pre>` : ''}
+                    ${showDetails ? `<pre>${formatPayloadDetail(event.data)}</pre>` : ''}
                   </article>
                 `;
               })
@@ -272,6 +341,13 @@ export const createErudaWebSocketPlugin = () => (erudaApi: typeof eruda) => {
             />
             <span>Expand details</span>
           </label>
+        </div>
+        <div class="inspectra-debugger-state is-${escapeHtml(debuggerState.status)}">
+          <strong>${escapeHtml(formatStatusLabel(debuggerState.status))}</strong>
+          <span>${escapeHtml(
+            debuggerState.message ??
+              'Inspectra uses the Chromium debugger API for WebSocket capture.'
+          )}</span>
         </div>
         <div class="inspectra-selection">
           ${
@@ -358,6 +434,30 @@ export const createErudaWebSocketPlugin = () => (erudaApi: typeof eruda) => {
               opacity: 0.72;
               font-size: 12px;
               border-bottom: 1px solid var(--border, rgba(127,127,127,0.2));
+            }
+            .inspectra-debugger-state {
+              display: grid;
+              gap: 4px;
+              padding: 10px;
+              margin: 0 -10px 8px;
+              border-bottom: 1px solid var(--border, rgba(127,127,127,0.2));
+              font-size: 12px;
+            }
+            .inspectra-debugger-state strong {
+              font-size: 12px;
+            }
+            .inspectra-debugger-state span {
+              opacity: 0.78;
+            }
+            .inspectra-debugger-state.is-attached strong {
+              color: #39b54a;
+            }
+            .inspectra-debugger-state.is-conflict strong,
+            .inspectra-debugger-state.is-error strong {
+              color: #ff5f56;
+            }
+            .inspectra-debugger-state.is-detached strong {
+              color: #f4b400;
             }
             .inspectra-card {
               position: relative;
@@ -455,7 +555,7 @@ export const createErudaWebSocketPlugin = () => (erudaApi: typeof eruda) => {
               word-break: break-word;
               font-size: 11px;
               line-height: 1.45;
-              max-height: 220px;
+              max-height: 400px;
               overflow: auto;
               padding: 10px;
               border-bottom: 1px solid var(--border, rgba(127,127,127,0.2));

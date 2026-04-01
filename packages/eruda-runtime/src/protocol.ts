@@ -31,6 +31,16 @@ export type InspectraRuntimeMessage =
         timestamp?: number;
         data: Record<string, unknown>;
       };
+    }
+  | {
+      channel: string;
+      source: 'inspectra-content';
+      type: 'websocket:debugger-status';
+      payload: {
+        status: 'idle' | 'attached' | 'detached' | 'error' | 'conflict';
+        message?: string;
+        ts?: number;
+      };
     };
 
 export const postToInspectraRuntime = (

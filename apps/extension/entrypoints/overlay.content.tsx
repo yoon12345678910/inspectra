@@ -6,6 +6,7 @@ import { injectScript } from 'wxt/utils/inject-script';
 const TOGGLE_MESSAGE = 'inspectra:toggle-overlay';
 const REGISTER_DEBUGGER_MESSAGE = 'inspectra:register-debugger-target';
 const WEBSOCKET_DEBUGGER_EVENT = 'inspectra:websocket-debugger-event';
+const WEBSOCKET_DEBUGGER_STATUS = 'inspectra:websocket-debugger-status';
 
 export default defineContentScript({
   matches: ['<all_urls>'],
@@ -71,6 +72,18 @@ export default defineContentScript({
               url?: string;
               timestamp?: number;
               data: Record<string, unknown>;
+            }
+          });
+          return;
+        }
+
+        if (message?.type === WEBSOCKET_DEBUGGER_STATUS && message.payload) {
+          postToInspectraRuntime({
+            type: 'websocket:debugger-status',
+            payload: message.payload as {
+              status: 'idle' | 'attached' | 'detached' | 'error' | 'conflict';
+              message?: string;
+              ts?: number;
             }
           });
           return;
