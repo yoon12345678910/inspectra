@@ -1,4 +1,4 @@
-import { bootstrapInspectraAgent, type InspectraPlugin } from '@inspectra/agent-main';
+import { bootstrapInspectraAgent, enablePlugin as enableAgentPlugin, type InspectraPlugin } from '@inspectra/agent-main';
 import { createErudaMediaPermissionsPlugin } from '@inspectra/eruda-plugin-media-permissions';
 import { createErudaWebRtcPlugin } from '@inspectra/eruda-plugin-webrtc';
 import { createErudaWebSocketPlugin } from '@inspectra/eruda-plugin-websocket';
@@ -72,6 +72,37 @@ const loadScript = (src: string): Promise<void> =>
     document.documentElement.appendChild(script);
   });
 
+const activatedPlugins = new Set<PluginName>();
+
+const activatePlugin = (name: PluginName) => {
+  if (activatedPlugins.has(name)) return;
+  activatedPlugins.add(name);
+
+  const eruda = (window as unknown as { eruda?: typeof import('eruda').default }).eruda;
+  if (!eruda) return;
+
+  if (name !== 'remote') {
+    enableAgentPlugin(name as InspectraPlugin);
+  }
+
+  switch (name) {
+    case 'webrtc':
+      eruda.add(createErudaWebRtcPlugin());
+      break;
+    case 'media':
+      eruda.add(createErudaMediaPermissionsPlugin());
+      break;
+    case 'websocket':
+      eruda.add(createErudaWebSocketPlugin());
+      break;
+    case 'remote':
+      eruda.add(createErudaRemotePlugin());
+      break;
+  }
+
+  eruda.show(name);
+};
+
 const initEruda = (sessionId: string, plugins: PluginName[]) => {
   const eruda = (window as unknown as { eruda: typeof import('eruda').default }).eruda;
   if (!eruda) return;
@@ -83,20 +114,22 @@ const initEruda = (sessionId: string, plugins: PluginName[]) => {
     defaults: { theme: 'Dark', displaySize: 70 }
   });
 
-  for (const plugin of plugins) {
-    switch (plugin) {
-      case 'webrtc':
-        eruda.add(createErudaWebRtcPlugin());
-        break;
-      case 'media':
-        eruda.add(createErudaMediaPermissionsPlugin());
-        break;
-      case 'websocket':
-        eruda.add(createErudaWebSocketPlugin());
-        break;
-      case 'remote':
-        eruda.add(createErudaRemotePlugin());
-        break;
+  const snippets = eruda.get('snippets') as unknown as {
+    add(name: string, fn: () => void, desc: string): void;
+  } | undefined;
+
+  if (snippets) {
+    const available: { name: PluginName; label: string; desc: string }[] = [
+      { name: 'websocket', label: 'WebSocket Inspector', desc: 'WebSocket 통신 모니터링' },
+      { name: 'webrtc', label: 'WebRTC Inspector', desc: 'WebRTC 연결 상태 및 통계' },
+      { name: 'media', label: 'Media Permissions', desc: '카메라/마이크 권한 상태' },
+      { name: 'remote', label: 'Remote Debugging', desc: '원격 디버깅 (PC ↔ 모바일)' }
+    ];
+
+    for (const { name, label, desc } of available) {
+      if (plugins.includes(name)) {
+        snippets.add(label, () => activatePlugin(name), desc);
+      }
     }
   }
 
@@ -271,8 +304,7 @@ export const Inspectra = {
     state.sessionId = createSessionId();
     state.initialized = true;
 
-    const agentPlugins = plugins.filter((p): p is InspectraPlugin => p !== 'remote');
-    bootstrapInspectraAgent(agentPlugins.length > 0 ? agentPlugins : undefined);
+    bootstrapInspectraAgent([]);
     setupRemoteEventListeners(state);
 
     if (relay) {
