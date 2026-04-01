@@ -40,6 +40,8 @@ jobs:
       - name: Build bookmarklet bundle
         env:
           INSPECTRA_BOOKMARKLET_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/inspectra-bookmarklet.js
+          INSPECTRA_RELAY_URL: ${{ vars.INSPECTRA_RELAY_URL }}
+          INSPECTRA_RELAY_ROOM: ${{ vars.INSPECTRA_RELAY_ROOM }}
         run: pnpm run build:bookmarklet
 
       - uses: actions/upload-pages-artifact@v3
