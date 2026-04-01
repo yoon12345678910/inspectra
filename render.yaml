@@ -4,7 +4,7 @@ services:
     name: inspectra-relay
     plan: free
     buildCommand: corepack enable && pnpm install
-    startCommand: node --import tsx apps/relay/src/node.ts
+    startCommand: pnpm relay
     envVars:
       - key: PORT
         value: 10000
