@@ -749,22 +749,42 @@ const installWebSocketHook = () => {
   window.WebSocket = InspectraWebSocket as typeof WebSocket;
 };
 
-const installHooks = () => {
-  const agent = getAgent();
-  if (agent.state.hooksInstalled) {
-    return;
-  }
+export type InspectraPlugin = 'websocket' | 'webrtc' | 'media';
 
-  installWebRtcHook();
-  installMediaPermissionHook();
-  installWebSocketHook();
+const installedPlugins = new Set<InspectraPlugin>();
+
+const installHookFor = (plugin: InspectraPlugin) => {
+  if (installedPlugins.has(plugin)) return;
+  installedPlugins.add(plugin);
+
+  switch (plugin) {
+    case 'webrtc':
+      installWebRtcHook();
+      break;
+    case 'media':
+      installMediaPermissionHook();
+      break;
+    case 'websocket':
+      installWebSocketHook();
+      break;
+  }
+};
+
+const installHooks = (plugins?: InspectraPlugin[]) => {
+  const agent = getAgent();
+  if (plugins) {
+    for (const p of plugins) installHookFor(p);
+  } else {
+    installHookFor('webrtc');
+    installHookFor('media');
+    installHookFor('websocket');
+  }
   agent.state.hooksInstalled = true;
 };
 
 const bootstrap = (sessionId: string) => {
   const agent = getAgent();
   agent.state.sessionId = sessionId;
-  installHooks();
   syncRuntimeState({ mediaPermissions: agent.mediaPermissions });
 
   if (agent.state.bootstrapped) {
@@ -801,7 +821,14 @@ if (!agent.messageListenerInstalled) {
   });
 }
 
-export const bootstrapInspectraAgent = () => {
-  installHooks();
+export const bootstrapInspectraAgent = (plugins?: InspectraPlugin[]) => {
+  installHooks(plugins);
   syncRuntimeState({ mediaPermissions: getAgent().mediaPermissions });
+};
+
+export const enablePlugin = (plugin: InspectraPlugin) => {
+  installHookFor(plugin);
+  if (plugin === 'media') {
+    syncRuntimeState({ mediaPermissions: getAgent().mediaPermissions });
+  }
 };

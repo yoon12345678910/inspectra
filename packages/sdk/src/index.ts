@@ -1,4 +1,4 @@
-import { bootstrapInspectraAgent } from '@inspectra/agent-main';
+import { bootstrapInspectraAgent, type InspectraPlugin } from '@inspectra/agent-main';
 import { createErudaMediaPermissionsPlugin } from '@inspectra/eruda-plugin-media-permissions';
 import { createErudaWebRtcPlugin } from '@inspectra/eruda-plugin-webrtc';
 import { createErudaWebSocketPlugin } from '@inspectra/eruda-plugin-websocket';
@@ -17,11 +17,13 @@ import { handleRemoteCommand, installConsoleStream, sendDeviceInfo, createId } f
 
 export type { RelayMessage, RelayClientOptions } from './relay-client';
 
+export type PluginName = 'websocket' | 'webrtc' | 'media' | 'remote';
+
 export interface InspectraOptions {
   relay?: string;
   room?: string;
   eruda?: boolean;
-  plugins?: boolean;
+  plugins?: PluginName[];
 }
 
 interface InspectraState {
@@ -70,7 +72,7 @@ const loadScript = (src: string): Promise<void> =>
     document.documentElement.appendChild(script);
   });
 
-const initEruda = (sessionId: string, plugins: boolean) => {
+const initEruda = (sessionId: string, plugins: PluginName[]) => {
   const eruda = (window as unknown as { eruda: typeof import('eruda').default }).eruda;
   if (!eruda) return;
 
@@ -81,13 +83,22 @@ const initEruda = (sessionId: string, plugins: boolean) => {
     defaults: { theme: 'Dark', displaySize: 70 }
   });
 
-  if (plugins) {
-    eruda.add(createErudaWebRtcPlugin());
-    eruda.add(createErudaMediaPermissionsPlugin());
-    eruda.add(createErudaWebSocketPlugin());
+  for (const plugin of plugins) {
+    switch (plugin) {
+      case 'webrtc':
+        eruda.add(createErudaWebRtcPlugin());
+        break;
+      case 'media':
+        eruda.add(createErudaMediaPermissionsPlugin());
+        break;
+      case 'websocket':
+        eruda.add(createErudaWebSocketPlugin());
+        break;
+      case 'remote':
+        eruda.add(createErudaRemotePlugin());
+        break;
+    }
   }
-
-  eruda.add(createErudaRemotePlugin());
 
   eruda.get('info')?.add('Inspectra Session', () => sessionId);
   eruda.get('info')?.add('Inspectra Runtime', 'SDK');
@@ -254,13 +265,14 @@ export const Inspectra = {
       relay,
       room,
       eruda: enableEruda = true,
-      plugins = true
+      plugins = []
     } = options;
 
     state.sessionId = createSessionId();
     state.initialized = true;
 
-    bootstrapInspectraAgent();
+    const agentPlugins = plugins.filter((p): p is InspectraPlugin => p !== 'remote');
+    bootstrapInspectraAgent(agentPlugins.length > 0 ? agentPlugins : undefined);
     setupRemoteEventListeners(state);
 
     if (relay) {
@@ -275,7 +287,7 @@ export const Inspectra = {
       try {
         await loadScript(ERUDA_CDN);
         state.erudaLoaded = true;
-        initEruda(state.sessionId, plugins);
+        initEruda(state.sessionId, plugins.length > 0 ? plugins : []);
       } catch (error) {
         console.warn('[Inspectra] Failed to load Eruda:', error);
       }

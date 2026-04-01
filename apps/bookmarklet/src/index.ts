@@ -15,7 +15,8 @@ const RELAY_ROOM = __INSPECTRA_RELAY_ROOM__;
 const launchInspectraBookmarklet = async () => {
   await Inspectra.init({
     relay: RELAY_URL || undefined,
-    room: RELAY_ROOM || undefined
+    room: RELAY_ROOM || undefined,
+    plugins: ['websocket', 'webrtc', 'media', 'remote']
   });
 };
 
