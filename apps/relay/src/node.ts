@@ -38,12 +38,17 @@ const sendPeerCount = (room: string) => {
 
 const useTls = TLS_CERT && TLS_KEY && existsSync(TLS_CERT) && existsSync(TLS_KEY);
 
+const handleRequest = (_req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => {
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ status: 'ok', rooms: rooms.size, uptime: process.uptime() }));
+};
+
 const server = useTls
   ? createHttpsServer({
       cert: readFileSync(TLS_CERT!),
       key: readFileSync(TLS_KEY!)
-    })
-  : createHttpServer();
+    }, handleRequest)
+  : createHttpServer(handleRequest);
 
 const wss = new WebSocketServer({ server });
 

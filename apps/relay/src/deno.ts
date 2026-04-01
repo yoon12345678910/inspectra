@@ -1,3 +1,8 @@
+/**
+ * @deprecated Kept for reference. Production relay now runs on Render (Node.js).
+ * See node.ts for the active implementation.
+ */
+
 interface RelayMessage {
   type: 'join' | 'event' | 'peer-count';
   room?: string;
