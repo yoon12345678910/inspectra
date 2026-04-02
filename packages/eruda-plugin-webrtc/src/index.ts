@@ -30,7 +30,6 @@ type ErudaPanelElement = {
 export interface InspectraErudaState {
   sessionId: string;
   webrtcEvents: WebRtcEvent[];
-  webrtcStatsHistory?: Record<string, WebRtcEvent[]>;
   webrtcDevices?: DeviceInfo[];
 }
 
@@ -97,9 +96,6 @@ export const getInspectraErudaState = (): InspectraErudaState => {
   return {
     sessionId: typeof store.sessionId === 'string' ? store.sessionId : '',
     webrtcEvents: Array.isArray(store.webrtcEvents) ? (store.webrtcEvents as WebRtcEvent[]) : [],
-    webrtcStatsHistory: store.webrtcStatsHistory && typeof store.webrtcStatsHistory === 'object'
-      ? (store.webrtcStatsHistory as Record<string, WebRtcEvent[]>)
-      : undefined,
     webrtcDevices: Array.isArray(store.webrtcDevices) ? (store.webrtcDevices as DeviceInfo[]) : undefined
   };
 };
@@ -194,9 +190,9 @@ export const createErudaWebRtcPlugin = () => (erudaApi: typeof eruda) => {
     };
 
     /* data */
-    private peers(ev: WebRtcEvent[], statsHist: Record<string, WebRtcEvent[]> | undefined): PeerInfo[] {
+    private peers(ev: WebRtcEvent[]): PeerInfo[] {
       const m = new Map<string, PeerInfo>();
-      const update = (e: WebRtcEvent) => {
+      for (const e of ev) {
         let p = m.get(e.peerId);
         if (!p) { p = { peerId: e.peerId, connectionState: 'new', iceState: 'new', signalingState: 'stable', firstSeen: e.ts, lastSeen: e.ts, closed: false }; m.set(e.peerId, p); }
         if (e.ts > p.lastSeen) p.lastSeen = e.ts;
@@ -205,20 +201,14 @@ export const createErudaWebRtcPlugin = () => (erudaApi: typeof eruda) => {
         if (typeof e.data.iceConnectionState === 'string') p.iceState = e.data.iceConnectionState;
         if (typeof e.data.signalingState === 'string') p.signalingState = e.data.signalingState;
         if (e.phase === 'closed') p.closed = true;
-      };
-      for (const e of ev) update(e);
-      // Also consider stats history for state updates
-      if (statsHist) {
-        for (const arr of Object.values(statsHist)) {
-          if (arr.length) update(arr[arr.length - 1]!);
-        }
       }
       return [...m.values()];
     }
 
-    private lastStats(statsHist: Record<string, WebRtcEvent[]> | undefined, pid: string) {
-      const arr = statsHist?.[pid];
-      if (arr?.length) return arr[arr.length - 1]!.data;
+    private lastStats(ev: WebRtcEvent[], pid: string) {
+      for (let i = ev.length - 1; i >= 0; i--) {
+        if (ev[i]!.peerId === pid && ev[i]!.phase === 'stats') return ev[i]!.data;
+      }
       return {} as Record<string, unknown>;
     }
 
@@ -236,8 +226,8 @@ export const createErudaWebRtcPlugin = () => (erudaApi: typeof eruda) => {
       return [...m.values()];
     }
 
-    private buildHist(statsHist: Record<string, WebRtcEvent[]> | undefined, pid: string) {
-      const se = statsHist?.[pid] ?? [];
+    private buildHist(ev: WebRtcEvent[], pid: string) {
+      const se = ev.filter((e) => e.peerId === pid && e.phase === 'stats');
       const h: StatsPoint[] = [];
       for (const e of se) {
         const rtt = typeof e.data.currentRoundTripTime === 'number' ? (e.data.currentRoundTripTime as number) * 1000 : null;
@@ -299,15 +289,15 @@ export const createErudaWebRtcPlugin = () => (erudaApi: typeof eruda) => {
       return h;
     }
 
-    private peersHtml(ev: WebRtcEvent[], peerList: PeerInfo[], statsHist: Record<string, WebRtcEvent[]> | undefined) {
+    private peersHtml(ev: WebRtcEvent[], peerList: PeerInfo[]) {
       if (!peerList.length) return '<div class="rtc-empty">No RTCPeerConnection activity yet.</div>';
       const peer = peerList.find((p) => p.peerId === this.peerId) ?? peerList[peerList.length - 1]!;
       if (this.peerId !== peer.peerId) this.peerId = peer.peerId;
 
-      const st = this.lastStats(statsHist, peer.peerId);
+      const st = this.lastStats(ev, peer.peerId);
       const ice = this.iceList(ev, peer.peerId);
       const sdp = this.sdps(ev, peer.peerId);
-      this.buildHist(statsHist, peer.peerId);
+      this.buildHist(ev, peer.peerId);
       const dur = fmtDur(peer.lastSeen - peer.firstSeen);
       const rtt = st.currentRoundTripTime;
       const rttMs = typeof rtt === 'number' ? `${(rtt as number * 1000).toFixed(0)}ms` : 'N/A';
@@ -428,7 +418,7 @@ export const createErudaWebRtcPlugin = () => (erudaApi: typeof eruda) => {
 
       const state = getInspectraErudaState();
       const ev = state.webrtcEvents;
-      const peerList = this.peers(ev, state.webrtcStatsHistory);
+      const peerList = this.peers(ev);
       const trkList = this.trks(ev);
 
       if (!this.peerId && peerList.length) this.peerId = peerList[peerList.length - 1]!.peerId;
@@ -458,7 +448,7 @@ export const createErudaWebRtcPlugin = () => (erudaApi: typeof eruda) => {
       let content = '';
       switch (this.tab) {
         case 'devices': content = this.devicesHtml(state.webrtcDevices); break;
-        case 'peers': content = this.peersHtml(ev, peerList, state.webrtcStatsHistory); break;
+        case 'peers': content = this.peersHtml(ev, peerList); break;
         case 'tracks': content = this.tracksHtml(ev); break;
       }
 

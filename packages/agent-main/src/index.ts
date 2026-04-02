@@ -31,7 +31,6 @@ interface AgentState {
 
 interface InspectraRuntimeState extends InspectraMediaPermissionsState {
   webrtcEvents: WebRtcEvent[];
-  webrtcStatsHistory: Record<string, WebRtcEvent[]>;
   webrtcDevices: DeviceInfo[];
   websocketEvents: WebSocketEvent[];
   websocketDebugger: WebSocketDebuggerState;
@@ -40,7 +39,6 @@ interface InspectraRuntimeState extends InspectraMediaPermissionsState {
 interface InspectraAgentGlobal {
   state: AgentState;
   webrtcBuffer: RingBuffer<WebRtcEvent>;
-  webrtcStatsHistory: Map<string, WebRtcEvent[]>;
   webrtcDevices: DeviceInfo[];
   websocketBuffer: RingBuffer<WebSocketEvent>;
   mediaPermissions: MediaPermissionSnapshot;
@@ -67,6 +65,17 @@ class RingBuffer<T> {
     }
   }
 
+  /** Replace last item matching predicate, or push if not found */
+  replaceOrPush(item: T, predicate: (existing: T) => boolean) {
+    for (let i = this.#items.length - 1; i >= 0; i--) {
+      if (predicate(this.#items[i]!)) {
+        this.#items[i] = item;
+        return;
+      }
+    }
+    this.push(item);
+  }
+
   toArray() {
     return [...this.#items];
   }
@@ -77,7 +86,6 @@ const getAgent = (): InspectraAgentGlobal => {
     window.__INSPECTRA_AGENT__ = {
       state: { bootstrapped: false, hooksInstalled: false, sessionId: '' },
       webrtcBuffer: new RingBuffer<WebRtcEvent>(),
-      webrtcStatsHistory: new Map(),
       webrtcDevices: [],
       websocketBuffer: new RingBuffer<WebSocketEvent>(),
       mediaPermissions: createDefaultMediaPermissionSnapshot(),
@@ -216,15 +224,13 @@ const syncRuntimeState = (next?: {
 
   if (next?.webrtcEvent) {
     if (next.webrtcEvent.phase === 'stats') {
-      // Stats go into separate per-peer history (max 60 per peer)
-      if (!agent.webrtcStatsHistory) agent.webrtcStatsHistory = new Map();
+      // Replace previous stats for same peer (keeps only 1 stats per peer in buffer)
       const pid = next.webrtcEvent.peerId;
-      const hist = agent.webrtcStatsHistory.get(pid) ?? [];
-      hist.push(next.webrtcEvent);
-      if (hist.length > 60) hist.shift();
-      agent.webrtcStatsHistory.set(pid, hist);
+      agent.webrtcBuffer.replaceOrPush(
+        next.webrtcEvent,
+        (e) => e.phase === 'stats' && e.peerId === pid
+      );
     } else {
-      // One-time events go into the main buffer (won't be pushed out by stats)
       agent.webrtcBuffer.push(next.webrtcEvent);
     }
   }
@@ -241,15 +247,9 @@ const syncRuntimeState = (next?: {
     agent.websocketDebugger = next.websocketDebugger;
   }
 
-  // Convert stats history Map to plain object for serialization
-  const statsObj: Record<string, WebRtcEvent[]> = {};
-  if (!agent.webrtcStatsHistory) agent.webrtcStatsHistory = new Map();
-  agent.webrtcStatsHistory.forEach((v, k) => { statsObj[k] = v; });
-
   const runtimeState: InspectraRuntimeState = {
     sessionId: agent.state.sessionId,
     webrtcEvents: agent.webrtcBuffer.toArray(),
-    webrtcStatsHistory: statsObj,
     webrtcDevices: agent.webrtcDevices,
     websocketEvents: agent.websocketBuffer.toArray(),
     mediaPermissions: agent.mediaPermissions,
