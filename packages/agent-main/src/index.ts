@@ -56,28 +56,34 @@ declare global {
 }
 
 class RingBuffer<T> {
-  #items: T[] = [];
+  private items: T[] = [];
 
   push(item: T) {
-    this.#items.push(item);
-    if (this.#items.length > MAX_EVENT_HISTORY) {
-      this.#items.shift();
+    this.items.push(item);
+    if (this.items.length > MAX_EVENT_HISTORY) {
+      this.items.shift();
     }
   }
 
-  /** Replace last item matching predicate, or push if not found */
-  replaceOrPush(item: T, predicate: (existing: T) => boolean) {
-    for (let i = this.#items.length - 1; i >= 0; i--) {
-      if (predicate(this.#items[i]!)) {
-        this.#items[i] = item;
-        return;
-      }
+  /** Replace last item at given index, or push if index is -1 */
+  replaceAt(index: number, item: T) {
+    if (index >= 0 && index < this.items.length) {
+      this.items[index] = item;
+    } else {
+      this.push(item);
     }
-    this.push(item);
+  }
+
+  /** Find last index matching predicate */
+  findLastIndex(predicate: (item: T) => boolean): number {
+    for (let i = this.items.length - 1; i >= 0; i--) {
+      if (predicate(this.items[i]!)) return i;
+    }
+    return -1;
   }
 
   toArray() {
-    return [...this.#items];
+    return [...this.items];
   }
 }
 
@@ -224,12 +230,12 @@ const syncRuntimeState = (next?: {
 
   if (next?.webrtcEvent) {
     if (next.webrtcEvent.phase === 'stats') {
-      // Replace previous stats for same peer (keeps only 1 stats per peer in buffer)
+      // Replace previous stats for same peer (keeps only 1 stats event per peer)
       const pid = next.webrtcEvent.peerId;
-      agent.webrtcBuffer.replaceOrPush(
-        next.webrtcEvent,
-        (e) => e.phase === 'stats' && e.peerId === pid
+      const idx = agent.webrtcBuffer.findLastIndex(
+        (e: WebRtcEvent) => e.phase === 'stats' && e.peerId === pid
       );
+      agent.webrtcBuffer.replaceAt(idx, next.webrtcEvent);
     } else {
       agent.webrtcBuffer.push(next.webrtcEvent);
     }
@@ -808,6 +814,8 @@ const installMediaPermissionHook = () => {
         ...request,
         outcome: 'granted'
       });
+      // Refresh device list now that permission is granted (labels become available)
+      void refreshWebRtcDevices();
       return stream;
     } catch (error) {
       const errorName = error instanceof DOMException ? error.name : 'UnknownError';
