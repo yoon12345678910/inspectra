@@ -135,11 +135,29 @@ const initEruda = (sessionId: string, plugins: PluginName[]) => {
   eruda.init({
     autoScale: true,
     useShadowDom: false,
-    tool: ['console', 'elements', 'network', 'resources', 'sources', 'info', 'settings'],
+    tool: ['console', 'elements', 'network', 'resources', 'sources', 'info', 'snippets', 'settings'],
     defaults: { theme: 'Dark', displaySize: 70 }
   });
 
-  // Activate all requested plugins as tabs directly (no snippets)
+  // Register all plugins as Snippets (toggle to activate)
+  const snippets = eruda.get('snippets') as unknown as {
+    add(name: string, fn: () => void, desc: string): void;
+  } | undefined;
+
+  if (snippets) {
+    const available: { name: PluginName; label: string; desc: string }[] = [
+      { name: 'websocket', label: 'WebSocket Inspector', desc: 'WebSocket 통신 모니터링' },
+      { name: 'webrtc', label: 'WebRTC Inspector', desc: 'WebRTC 연결 상태 및 통계' },
+      { name: 'media', label: 'Media Permissions', desc: '카메라/마이크 권한 상태' },
+      { name: 'remote', label: 'Remote Debugging', desc: '원격 디버깅 (PC ↔ 모바일)' }
+    ];
+
+    for (const { name, label, desc } of available) {
+      snippets.add(label, () => activatePlugin(name), desc);
+    }
+  }
+
+  // Auto-activate plugins from explicit list + localStorage persistence
   for (const name of plugins) {
     activatePlugin(name);
   }
