@@ -159,6 +159,7 @@ export const createErudaWebRtcPlugin = () => (erudaApi: typeof eruda) => {
     private sdpView: 'local' | 'remote' = 'local';
     private scrollTop = 0;
     private timer: ReturnType<typeof setTimeout> | null = null;
+    private rendering = false;
     private hist = new Map<string, StatsPoint[]>();
     private prevB = new Map<string, { s: number; r: number; t: number }>();
 
@@ -406,7 +407,8 @@ export const createErudaWebRtcPlugin = () => (erudaApi: typeof eruda) => {
     }
 
     render() {
-      if (!this.panel) return;
+      if (!this.panel || this.rendering) return;
+      this.rendering = true;
 
       // Save scroll
       const prevScroll = this.scrollTop;
@@ -451,6 +453,7 @@ export const createErudaWebRtcPlugin = () => (erudaApi: typeof eruda) => {
         <div class="rtc-tabs">${tabs}</div>${bar}
         <div class="rtc-body">${content}</div>
       </div>`);
+      this.rendering = false;
 
       // Restore scroll & bind
       requestAnimationFrame(() => {
@@ -472,7 +475,6 @@ export const createErudaWebRtcPlugin = () => (erudaApi: typeof eruda) => {
       const sels = document.querySelectorAll<HTMLSelectElement>('.rtc [data-role="psel"]');
       sels.forEach((sel) => {
         sel.addEventListener('change', () => { this.peerId = sel.value; this.scrollTop = 0; this.render(); });
-        sel.addEventListener('blur', () => { if (this.timer) { clearTimeout(this.timer); this.timer = null; this.render(); } });
       });
 
       document.querySelectorAll<HTMLElement>('.rtc [data-sdp]').forEach((btn) =>
