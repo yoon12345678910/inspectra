@@ -48,7 +48,7 @@ declare global {
 
 /* ── helpers ── */
 
-const escapeHtml = (value: string) =>
+const esc = (value: string) =>
   value
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
@@ -56,12 +56,12 @@ const escapeHtml = (value: string) =>
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
 
-const formatTimestamp = (ts: number) => {
+const fmtTime = (ts: number) => {
   const d = new Date(ts);
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}.${String(d.getMilliseconds()).padStart(3, '0')}`;
 };
 
-const formatDuration = (ms: number) => {
+const fmtDuration = (ms: number) => {
   const s = Math.floor(ms / 1000);
   const m = Math.floor(s / 60);
   const h = Math.floor(m / 60);
@@ -70,18 +70,24 @@ const formatDuration = (ms: number) => {
   return `${s}s`;
 };
 
-const formatBytes = (bytes: unknown) => {
-  if (typeof bytes !== 'number') return '';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+const fmtBytes = (v: unknown) => {
+  if (typeof v !== 'number') return 'N/A';
+  if (v < 1024) return `${v} B`;
+  if (v < 1048576) return `${(v / 1024).toFixed(1)} KB`;
+  return `${(v / 1048576).toFixed(1)} MB`;
 };
 
-const formatBitrate = (bps: unknown) => {
+const fmtBitrate = (bps: unknown) => {
   if (typeof bps !== 'number' || bps <= 0) return '';
   if (bps < 1000) return `${bps.toFixed(0)} bps`;
-  if (bps < 1_000_000) return `${(bps / 1000).toFixed(1)} Kbps`;
-  return `${(bps / 1_000_000).toFixed(1)} Mbps`;
+  if (bps < 1e6) return `${(bps / 1000).toFixed(1)} Kbps`;
+  return `${(bps / 1e6).toFixed(1)} Mbps`;
+};
+
+const fmtMetric = (v: unknown, suffix = '') => {
+  if (v === undefined || v === null || v === '') return 'N/A';
+  if (typeof v === 'number') return `${Math.round(v * 100) / 100}${suffix}`;
+  return `${v}${suffix}`;
 };
 
 type TabId = 'devices' | 'peers' | 'tracks';
@@ -118,7 +124,7 @@ export const getInspectraErudaState = (): InspectraErudaState => {
 
 /* ── CSS ── */
 
-const CSS = `
+const CSS = /* css */ `
 .rtc-root {
   height: 100%;
   display: flex;
@@ -126,13 +132,16 @@ const CSS = `
   font-size: 12px;
   color: inherit;
   box-sizing: border-box;
+  overflow: hidden;
 }
+.rtc-root * { box-sizing: border-box; }
 
-/* tabs bar */
+/* tabs */
 .rtc-tabs {
   display: flex;
   border-bottom: 1px solid var(--border, rgba(127,127,127,.2));
   flex-shrink: 0;
+  overflow-x: auto;
 }
 .rtc-tab {
   padding: 7px 14px;
@@ -141,63 +150,24 @@ const CSS = `
   border: none;
   background: transparent;
   color: inherit;
-  opacity: .55;
+  opacity: .5;
   border-bottom: 2px solid transparent;
   white-space: nowrap;
+  flex-shrink: 0;
 }
-.rtc-tab.is-active {
-  opacity: 1;
-  border-bottom-color: var(--accent, #4a90d9);
-}
+.rtc-tab.is-active { opacity: 1; border-bottom-color: var(--accent, #4a90d9); }
 
-/* scroll container */
-.rtc-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: 8px 10px;
-}
-
-/* ── devices tab ── */
-.rtc-device-group {
-  margin-bottom: 12px;
-}
-.rtc-device-group-title {
-  font-size: 11px;
-  font-weight: 600;
-  opacity: .6;
-  text-transform: uppercase;
-  letter-spacing: .04em;
-  margin-bottom: 6px;
-}
-.rtc-device-item {
-  padding: 6px 8px;
-  border: 1px solid var(--border, rgba(127,127,127,.15));
-  border-radius: 4px;
-  margin-bottom: 4px;
-  font-size: 11px;
-}
-.rtc-device-label {
-  font-weight: 500;
-  margin-bottom: 2px;
-}
-.rtc-device-id {
-  opacity: .5;
-  font-size: 10px;
-  word-break: break-all;
-}
-
-/* ── peers tab ── */
-.rtc-peer-select-bar {
+/* peer bar */
+.rtc-peer-bar {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
+  padding: 5px 10px;
   border-bottom: 1px solid var(--border, rgba(127,127,127,.2));
   background: var(--darker-background, rgba(127,127,127,.06));
   flex-shrink: 0;
 }
-.rtc-peer-select {
+.rtc-peer-sel {
   flex: 1;
   min-width: 0;
   padding: 3px 6px;
@@ -207,217 +177,134 @@ const CSS = `
   color: inherit;
   font-size: 11px;
 }
-.rtc-peer-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex-shrink: 0;
+.rtc-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
 }
-.rtc-peer-dot.is-connected { background: #39b54a; }
-.rtc-peer-dot.is-closed { background: #999; }
-.rtc-peer-dot.is-connecting { background: #f4b400; }
-.rtc-peer-dot.is-failed { background: #ff5f56; }
+.rtc-dot.connected { background: #39b54a; }
+.rtc-dot.closed { background: #999; }
+.rtc-dot.new, .rtc-dot.connecting { background: #f4b400; }
+.rtc-dot.failed { background: #ff5f56; }
+.rtc-peer-count { font-size: 11px; opacity: .5; white-space: nowrap; }
 
-/* sections inside peers */
-.rtc-section {
-  margin-bottom: 14px;
+/* content scroll */
+.rtc-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 10px;
 }
-.rtc-section-title {
-  font-size: 11px;
-  font-weight: 600;
-  opacity: .6;
-  text-transform: uppercase;
+
+/* section */
+.rtc-sec { margin-bottom: 14px; }
+.rtc-sec-t {
+  font-size: 11px; font-weight: 600; opacity: .55;
+  text-transform: uppercase; letter-spacing: .03em;
   margin-bottom: 6px;
-  letter-spacing: .04em;
 }
+
+/* stat grid */
 .rtc-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+  gap: 5px;
 }
-.rtc-stat-box {
-  padding: 6px 8px;
-  border: 1px solid var(--border, rgba(127,127,127,.15));
+.rtc-stat {
+  padding: 5px 6px;
+  border: 1px solid var(--border, rgba(127,127,127,.12));
   border-radius: 4px;
   text-align: center;
+  min-width: 0;
+  overflow: hidden;
 }
-.rtc-stat-value {
-  font-size: 14px;
-  font-weight: 600;
+.rtc-stat-v {
+  font-size: 13px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.rtc-stat-label {
-  font-size: 10px;
-  opacity: .55;
-  margin-top: 2px;
-}
-.rtc-stat-value.is-good { color: #39b54a; }
-.rtc-stat-value.is-warn { color: #f4b400; }
-.rtc-stat-value.is-bad { color: #ff5f56; }
+.rtc-stat-l { font-size: 10px; opacity: .5; margin-top: 1px; }
+.rtc-stat-v.good { color: #39b54a; }
+.rtc-stat-v.warn { color: #f4b400; }
+.rtc-stat-v.bad { color: #ff5f56; }
 
-/* mini table for ICE/codecs */
-.rtc-mini-table {
-  width: 100%;
-  border-collapse: collapse;
-  table-layout: fixed;
-  font-size: 11px;
+/* table */
+.rtc-tbl {
+  width: 100%; border-collapse: collapse; font-size: 11px;
 }
-.rtc-mini-table th {
-  text-align: left;
-  padding: 3px 6px;
-  font-weight: 500;
-  opacity: .6;
+.rtc-tbl th {
+  text-align: left; padding: 3px 6px; font-weight: 500; opacity: .55;
   border-bottom: 1px solid var(--border, rgba(127,127,127,.2));
   white-space: nowrap;
 }
-.rtc-mini-table td {
+.rtc-tbl td {
   padding: 3px 6px;
-  border-bottom: 1px solid var(--border, rgba(127,127,127,.08));
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  border-bottom: 1px solid var(--border, rgba(127,127,127,.06));
+  word-break: break-all;
 }
-.rtc-mini-table tr.is-active td {
-  background: rgba(57,181,74,.08);
-}
+.rtc-tbl tr.active td { background: rgba(57,181,74,.08); }
 
-/* SDP viewer */
-.rtc-sdp-toggle {
-  display: flex;
-  gap: 0;
-  margin-bottom: 6px;
-}
-.rtc-sdp-btn {
+/* SDP */
+.rtc-sdp-btns { display: flex; gap: 0; margin-bottom: 6px; }
+.rtc-sdp-b {
   padding: 4px 10px;
   border: 1px solid var(--border, rgba(127,127,127,.2));
-  background: transparent;
-  color: inherit;
-  font-size: 11px;
-  cursor: pointer;
-  opacity: .6;
+  background: transparent; color: inherit;
+  font-size: 11px; cursor: pointer; opacity: .55;
 }
-.rtc-sdp-btn:first-child { border-radius: 4px 0 0 4px; }
-.rtc-sdp-btn:last-child { border-radius: 0 4px 4px 0; }
-.rtc-sdp-btn.is-active {
-  opacity: 1;
-  background: var(--accent, #4a90d9);
-  color: #fff;
-  border-color: var(--accent, #4a90d9);
-}
+.rtc-sdp-b:first-child { border-radius: 4px 0 0 4px; }
+.rtc-sdp-b:last-child { border-radius: 0 4px 4px 0; }
+.rtc-sdp-b.on { opacity: 1; background: var(--accent, #4a90d9); color: #fff; border-color: var(--accent, #4a90d9); }
 .rtc-sdp-pre {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-size: 10px;
-  line-height: 1.5;
-  max-height: 200px;
-  overflow: auto;
-  padding: 8px;
-  border: 1px solid var(--border, rgba(127,127,127,.15));
+  margin: 0; white-space: pre-wrap; word-break: break-word;
+  font-size: 10px; line-height: 1.45;
+  max-height: 200px; overflow: auto; padding: 8px;
+  border: 1px solid var(--border, rgba(127,127,127,.12));
   border-radius: 4px;
   background: var(--darker-background, rgba(127,127,127,.04));
 }
 
 /* graph */
-.rtc-graph-wrap {
-  height: 60px;
-  position: relative;
-  border: 1px solid var(--border, rgba(127,127,127,.15));
-  border-radius: 4px;
-  overflow: hidden;
-  margin-bottom: 4px;
-}
-.rtc-graph-canvas {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-.rtc-graph-legend {
-  display: flex;
-  gap: 12px;
-  font-size: 10px;
-  opacity: .6;
-}
-.rtc-graph-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  margin-right: 3px;
-  vertical-align: middle;
-}
+.rtc-graph { height: 60px; border: 1px solid var(--border, rgba(127,127,127,.12)); border-radius: 4px; overflow: hidden; margin-bottom: 4px; }
+.rtc-graph svg { width: 100%; height: 100%; display: block; }
+.rtc-legend { display: flex; gap: 10px; font-size: 10px; opacity: .55; flex-wrap: wrap; }
+.rtc-ldot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 3px; vertical-align: middle; }
 
-/* ── tracks tab ── */
-.rtc-track-card {
+/* device */
+.rtc-dev-grp { margin-bottom: 12px; }
+.rtc-dev-item {
+  padding: 6px 8px;
+  border: 1px solid var(--border, rgba(127,127,127,.12));
+  border-radius: 4px; margin-bottom: 4px; font-size: 11px;
+}
+.rtc-dev-label { font-weight: 500; word-break: break-word; }
+.rtc-dev-id { opacity: .4; font-size: 10px; word-break: break-all; }
+
+/* track */
+.rtc-trk {
   padding: 8px;
-  border: 1px solid var(--border, rgba(127,127,127,.15));
-  border-radius: 4px;
-  margin-bottom: 6px;
-  cursor: pointer;
+  border: 1px solid var(--border, rgba(127,127,127,.12));
+  border-radius: 4px; margin-bottom: 5px; cursor: pointer;
 }
-.rtc-track-card.is-selected {
-  background: rgba(127,127,127,.08);
-  border-color: var(--accent, rgba(127,127,127,.35));
+.rtc-trk.on { background: rgba(127,127,127,.07); border-color: var(--accent, rgba(127,127,127,.3)); }
+.rtc-trk-h { display: flex; align-items: center; gap: 6px; }
+.rtc-trk-icon { font-size: 13px; width: 18px; text-align: center; flex-shrink: 0; }
+.rtc-trk-name {
+  font-weight: 500; font-size: 11px; flex: 1; min-width: 0;
+  word-break: break-word;
 }
-.rtc-track-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 4px;
+.rtc-trk-st {
+  font-size: 10px; padding: 1px 5px; border-radius: 3px;
+  border: 1px solid; flex-shrink: 0;
 }
-.rtc-track-icon {
-  font-size: 14px;
-  width: 20px;
-  text-align: center;
-}
-.rtc-track-name {
-  font-weight: 500;
-  font-size: 11px;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.rtc-track-state {
-  font-size: 10px;
-  padding: 1px 5px;
-  border-radius: 3px;
-  border: 1px solid;
-}
-.rtc-track-state.is-live { color: #39b54a; border-color: #39b54a; }
-.rtc-track-state.is-ended { color: #999; border-color: #999; }
-.rtc-track-detail {
-  font-size: 11px;
-  padding-top: 6px;
-  border-top: 1px solid var(--border, rgba(127,127,127,.1));
-  margin-top: 6px;
-}
-.rtc-track-detail dt {
-  display: inline;
-  opacity: .55;
-}
-.rtc-track-detail dt::after { content: ': '; }
-.rtc-track-detail dd {
-  display: inline;
-  margin: 0;
-}
-.rtc-track-detail dd::after { content: '\\A'; white-space: pre; }
+.rtc-trk-st.live { color: #39b54a; border-color: #39b54a; }
+.rtc-trk-st.ended { color: #999; border-color: #999; }
+.rtc-trk-info { font-size: 11px; opacity: .55; margin-top: 2px; margin-left: 24px; word-break: break-word; }
+.rtc-trk-dl { font-size: 11px; padding-top: 6px; border-top: 1px solid var(--border, rgba(127,127,127,.08)); margin-top: 6px; }
+.rtc-trk-dl dt { display: inline; opacity: .5; }
+.rtc-trk-dl dt::after { content: ': '; }
+.rtc-trk-dl dd { display: inline; margin: 0; word-break: break-word; }
+.rtc-trk-dl dd::after { content: '\\A'; white-space: pre; }
 
-.rtc-empty {
-  padding: 20px 10px;
-  text-align: center;
-  opacity: .5;
-  font-size: 12px;
-}
-.rtc-kv-row {
-  display: flex;
-  justify-content: space-between;
-  padding: 3px 0;
-  font-size: 11px;
-  border-bottom: 1px solid var(--border, rgba(127,127,127,.06));
-}
-.rtc-kv-label { opacity: .55; }
-.rtc-kv-value { font-weight: 500; text-align: right; }
+.rtc-empty { padding: 20px 10px; text-align: center; opacity: .45; font-size: 12px; }
 `;
 
 /* ── plugin ── */
@@ -426,601 +313,451 @@ export const createErudaWebRtcPlugin = () => (erudaApi: typeof eruda) => {
   class InspectraWebRtcTool extends erudaApi.Tool {
     name = 'webrtc';
     private panel?: ErudaPanelElement;
-    private pendingRender = false;
-
-    private onUpdate = () => {
-      // Skip render if a select/input is focused to prevent closing dropdowns
-      const active = document.activeElement;
-      if (active && (active.tagName === 'SELECT' || active.tagName === 'INPUT')) {
-        this.pendingRender = true;
-        return;
-      }
-
-      // Throttle renders to max once per 500ms to prevent flickering
-      const now = Date.now();
-      const elapsed = now - this.lastRenderTime;
-      if (elapsed >= 500) {
-        this.render();
-      } else if (!this.renderTimer) {
-        this.renderTimer = setTimeout(() => {
-          this.renderTimer = null;
-          this.render();
-        }, 500 - elapsed);
-      }
-    };
+    private mounted = false;
 
     private activeTab: TabId = 'peers';
     private selectedPeerId: string | null = null;
     private selectedTrackId: string | null = null;
     private sdpView: 'local' | 'remote' = 'local';
-    private scrollTop = 0;
-    private renderTimer: ReturnType<typeof setTimeout> | null = null;
-    private lastRenderTime = 0;
 
-    // Stats history per peer for graph
     private statsHistory = new Map<string, StatsPoint[]>();
-    private prevBytesSent = new Map<string, number>();
-    private prevBytesRecv = new Map<string, number>();
-    private prevStatsTs = new Map<string, number>();
+    private prevBytes = new Map<string, { sent: number; recv: number; ts: number }>();
 
-    private getPeerList(events: WebRtcEvent[]): PeerInfo[] {
-      const map = new Map<string, PeerInfo>();
-      for (const e of events) {
-        let info = map.get(e.peerId);
-        if (!info) {
-          info = {
-            peerId: e.peerId,
-            connectionState: 'new',
-            iceState: 'new',
-            signalingState: 'stable',
-            firstSeen: e.ts,
-            lastSeen: e.ts,
-            closed: false
-          };
-          map.set(e.peerId, info);
+    private throttleTimer: ReturnType<typeof setTimeout> | null = null;
+
+    private onUpdate = () => {
+      // Never re-render while user interacts with a control
+      const tag = document.activeElement?.tagName;
+      if (tag === 'SELECT' || tag === 'INPUT' || tag === 'BUTTON') {
+        // Schedule after blur
+        if (!this.throttleTimer) {
+          this.throttleTimer = setTimeout(() => {
+            this.throttleTimer = null;
+            this.updateContent();
+          }, 600);
         }
-        info.lastSeen = e.ts;
-        if (typeof e.data.connectionState === 'string') info.connectionState = e.data.connectionState;
-        if (typeof e.data.iceConnectionState === 'string') info.iceState = e.data.iceConnectionState;
-        if (typeof e.data.signalingState === 'string') info.signalingState = e.data.signalingState;
-        if (e.phase === 'closed') info.closed = true;
+        return;
       }
-      return [...map.values()];
-    }
+      if (this.throttleTimer) return;
+      this.updateContent();
+      this.throttleTimer = setTimeout(() => { this.throttleTimer = null; }, 400);
+    };
 
-    private getPeerDotClass(peer: PeerInfo): string {
-      if (peer.closed || peer.connectionState === 'closed') return 'is-closed';
-      if (peer.connectionState === 'connected') return 'is-connected';
-      if (peer.connectionState === 'failed') return 'is-failed';
-      return 'is-connecting';
-    }
+    /* ── data helpers ── */
 
-    private getLatestStats(events: WebRtcEvent[], peerId: string): Record<string, unknown> {
-      for (let i = events.length - 1; i >= 0; i--) {
-        if (events[i]!.peerId === peerId && events[i]!.phase === 'stats') {
-          return events[i]!.data;
+    private getPeers(events: WebRtcEvent[]): PeerInfo[] {
+      const m = new Map<string, PeerInfo>();
+      for (const e of events) {
+        let p = m.get(e.peerId);
+        if (!p) {
+          p = { peerId: e.peerId, connectionState: 'new', iceState: 'new', signalingState: 'stable', firstSeen: e.ts, lastSeen: e.ts, closed: false };
+          m.set(e.peerId, p);
         }
+        p.lastSeen = e.ts;
+        if (typeof e.data.connectionState === 'string') p.connectionState = e.data.connectionState;
+        if (typeof e.data.iceConnectionState === 'string') p.iceState = e.data.iceConnectionState;
+        if (typeof e.data.signalingState === 'string') p.signalingState = e.data.signalingState;
+        if (e.phase === 'closed') p.closed = true;
+      }
+      return [...m.values()];
+    }
+
+    private latestStats(events: WebRtcEvent[], pid: string): Record<string, unknown> {
+      for (let i = events.length - 1; i >= 0; i--) {
+        if (events[i]!.peerId === pid && events[i]!.phase === 'stats') return events[i]!.data;
       }
       return {};
     }
 
-    private getIceCandidates(events: WebRtcEvent[], peerId: string): WebRtcEvent[] {
-      return events.filter((e) => e.peerId === peerId && e.phase === 'ice-candidate');
+    private iceCandidates(events: WebRtcEvent[], pid: string) {
+      return events.filter((e) => e.peerId === pid && e.phase === 'ice-candidate');
     }
 
-    private getSdpEvents(events: WebRtcEvent[], peerId: string): { local?: string; remote?: string } {
-      let local: string | undefined;
-      let remote: string | undefined;
+    private sdpData(events: WebRtcEvent[], pid: string) {
+      let local: string | undefined, remote: string | undefined;
       for (const e of events) {
-        if (e.peerId !== peerId || e.phase !== 'sdp') continue;
+        if (e.peerId !== pid || e.phase !== 'sdp') continue;
         if (e.data.direction === 'local') local = e.data.sdp as string;
         if (e.data.direction === 'remote') remote = e.data.sdp as string;
       }
       return { local, remote };
     }
 
-    private getTrackEvents(events: WebRtcEvent[], peerId?: string): WebRtcEvent[] {
-      return events.filter((e) => e.phase === 'track' && (!peerId || e.peerId === peerId));
-    }
-
-    private updateStatsHistory(events: WebRtcEvent[], peerId: string) {
-      const statsEvents = events.filter((e) => e.peerId === peerId && e.phase === 'stats');
-      const history: StatsPoint[] = [];
-
-      for (const e of statsEvents) {
-        const rtt = typeof e.data.currentRoundTripTime === 'number'
-          ? e.data.currentRoundTripTime * 1000
-          : null;
-
-        const bytesSent = typeof e.data.bytesSent === 'number' ? e.data.bytesSent : 0;
-        const bytesRecv = typeof e.data.bytesReceived === 'number' ? e.data.bytesReceived : 0;
-
-        const prevSent = this.prevBytesSent.get(peerId) ?? bytesSent;
-        const prevRecv = this.prevBytesRecv.get(peerId) ?? bytesRecv;
-        const prevTs = this.prevStatsTs.get(peerId) ?? e.ts;
-        const dtSec = (e.ts - prevTs) / 1000 || 1;
-
-        const bitrateSent = ((bytesSent - prevSent) * 8) / dtSec;
-        const bitrateRecv = ((bytesRecv - prevRecv) * 8) / dtSec;
-
-        this.prevBytesSent.set(peerId, bytesSent);
-        this.prevBytesRecv.set(peerId, bytesRecv);
-        this.prevStatsTs.set(peerId, e.ts);
-
-        history.push({
-          ts: e.ts,
-          rtt,
-          bitrateSent: bitrateSent > 0 ? bitrateSent : null,
-          bitrateRecv: bitrateRecv > 0 ? bitrateRecv : null
-        });
+    private tracks(events: WebRtcEvent[]) {
+      const m = new Map<string, WebRtcEvent>();
+      for (const e of events) {
+        if (e.phase !== 'track') continue;
+        m.set(String(e.data.trackId ?? e.id), e);
       }
-
-      // Keep last 60 points (~2 minutes at 2s interval)
-      this.statsHistory.set(peerId, history.slice(-60));
+      return [...m.values()];
     }
 
-    private renderGraph(peerId: string): string {
-      const points = this.statsHistory.get(peerId) ?? [];
-      if (points.length < 2) return '';
+    private buildHistory(events: WebRtcEvent[], pid: string) {
+      const se = events.filter((e) => e.peerId === pid && e.phase === 'stats');
+      const hist: StatsPoint[] = [];
+      for (const e of se) {
+        const rtt = typeof e.data.currentRoundTripTime === 'number' ? e.data.currentRoundTripTime * 1000 : null;
+        const bs = typeof e.data.bytesSent === 'number' ? e.data.bytesSent : 0;
+        const br = typeof e.data.bytesReceived === 'number' ? e.data.bytesReceived : 0;
+        const prev = this.prevBytes.get(pid);
+        const dt = prev ? (e.ts - prev.ts) / 1000 || 1 : 1;
+        const bSent = prev ? ((bs - prev.sent) * 8) / dt : 0;
+        const bRecv = prev ? ((br - prev.recv) * 8) / dt : 0;
+        this.prevBytes.set(pid, { sent: bs, recv: br, ts: e.ts });
+        hist.push({ ts: e.ts, rtt, bitrateSent: bSent > 0 ? bSent : null, bitrateRecv: bRecv > 0 ? bRecv : null });
+      }
+      this.statsHistory.set(pid, hist.slice(-60));
+    }
 
-      const W = 300;
-      const H = 55;
-      const maxRtt = Math.max(...points.map((p) => p.rtt ?? 0), 10);
-      const maxBitrate = Math.max(
-        ...points.map((p) => Math.max(p.bitrateSent ?? 0, p.bitrateRecv ?? 0)),
-        1000
-      );
+    /* ── render pieces ── */
 
-      const buildPath = (getValue: (p: StatsPoint) => number | null, maxVal: number) => {
-        const pts = points
-          .map((p, i) => {
-            const v = getValue(p);
-            if (v === null) return null;
-            const x = (i / (points.length - 1)) * W;
-            const y = H - (v / maxVal) * (H - 4) - 2;
-            return `${x},${y}`;
-          })
-          .filter(Boolean);
-        return pts.length > 1 ? `M${pts.join('L')}` : '';
+    private dotClass(p: PeerInfo) {
+      if (p.closed || p.connectionState === 'closed') return 'closed';
+      if (p.connectionState === 'connected') return 'connected';
+      if (p.connectionState === 'failed') return 'failed';
+      return 'connecting';
+    }
+
+    private rttCls(v: unknown) {
+      if (typeof v !== 'number') return '';
+      const ms = v * 1000;
+      return ms < 100 ? 'good' : ms < 300 ? 'warn' : 'bad';
+    }
+
+    private stat(label: string, value: string, cls = '') {
+      return `<div class="rtc-stat"><div class="rtc-stat-v ${cls}">${esc(value)}</div><div class="rtc-stat-l">${esc(label)}</div></div>`;
+    }
+
+    private graphSvg(pid: string) {
+      const pts = this.statsHistory.get(pid) ?? [];
+      if (pts.length < 2) return '';
+      const W = 300, H = 55;
+      const maxR = Math.max(...pts.map((p) => p.rtt ?? 0), 10);
+      const maxB = Math.max(...pts.map((p) => Math.max(p.bitrateSent ?? 0, p.bitrateRecv ?? 0)), 1000);
+      const path = (fn: (p: StatsPoint) => number | null, mx: number) => {
+        const d = pts.map((p, i) => { const v = fn(p); if (v === null) return null; return `${(i / (pts.length - 1)) * W},${H - (v / mx) * (H - 4) - 2}`; }).filter(Boolean);
+        return d.length > 1 ? `M${d.join('L')}` : '';
       };
-
-      const rttPath = buildPath((p) => p.rtt, maxRtt);
-      const sentPath = buildPath((p) => p.bitrateSent, maxBitrate);
-      const recvPath = buildPath((p) => p.bitrateRecv, maxBitrate);
-
-      const lastP = points[points.length - 1]!;
-      const rttLabel = lastP.rtt !== null ? `${lastP.rtt.toFixed(0)}ms` : '';
-      const sentLabel = lastP.bitrateSent ? formatBitrate(lastP.bitrateSent) : '';
-      const recvLabel = lastP.bitrateRecv ? formatBitrate(lastP.bitrateRecv) : '';
-
-      return `
-        <div class="rtc-section">
-          <div class="rtc-section-title">Real-time Stats</div>
-          <div class="rtc-graph-wrap">
-            <svg class="rtc-graph-canvas" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-              ${rttPath ? `<path d="${rttPath}" fill="none" stroke="#4a90d9" stroke-width="1.5" vector-effect="non-scaling-stroke"/>` : ''}
-              ${sentPath ? `<path d="${sentPath}" fill="none" stroke="#39b54a" stroke-width="1" vector-effect="non-scaling-stroke"/>` : ''}
-              ${recvPath ? `<path d="${recvPath}" fill="none" stroke="#e74c3c" stroke-width="1" vector-effect="non-scaling-stroke"/>` : ''}
-            </svg>
-          </div>
-          <div class="rtc-graph-legend">
-            <span><span class="rtc-graph-dot" style="background:#4a90d9"></span>RTT ${escapeHtml(rttLabel)}</span>
-            <span><span class="rtc-graph-dot" style="background:#39b54a"></span>Sent ${escapeHtml(sentLabel)}</span>
-            <span><span class="rtc-graph-dot" style="background:#e74c3c"></span>Recv ${escapeHtml(recvLabel)}</span>
-          </div>
+      const rP = path((p) => p.rtt, maxR), sP = path((p) => p.bitrateSent, maxB), rR = path((p) => p.bitrateRecv, maxB);
+      const last = pts[pts.length - 1]!;
+      return `<div class="rtc-sec">
+        <div class="rtc-sec-t">Real-time</div>
+        <div class="rtc-graph"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+          ${rP ? `<path d="${rP}" fill="none" stroke="#4a90d9" stroke-width="1.5" vector-effect="non-scaling-stroke"/>` : ''}
+          ${sP ? `<path d="${sP}" fill="none" stroke="#39b54a" stroke-width="1" vector-effect="non-scaling-stroke"/>` : ''}
+          ${rR ? `<path d="${rR}" fill="none" stroke="#e74c3c" stroke-width="1" vector-effect="non-scaling-stroke"/>` : ''}
+        </svg></div>
+        <div class="rtc-legend">
+          <span><span class="rtc-ldot" style="background:#4a90d9"></span>RTT ${last.rtt !== null ? esc(`${last.rtt.toFixed(0)}ms`) : ''}</span>
+          <span><span class="rtc-ldot" style="background:#39b54a"></span>Sent ${esc(fmtBitrate(last.bitrateSent))}</span>
+          <span><span class="rtc-ldot" style="background:#e74c3c"></span>Recv ${esc(fmtBitrate(last.bitrateRecv))}</span>
         </div>
-      `;
+      </div>`;
     }
 
-    private rttClass(rtt: unknown): string {
-      if (typeof rtt !== 'number') return '';
-      const ms = rtt * 1000;
-      if (ms < 100) return 'is-good';
-      if (ms < 300) return 'is-warn';
-      return 'is-bad';
-    }
+    /* ── tab content builders ── */
 
-    /* ── tab renderers ── */
-
-    private renderDevicesTab(devices: DeviceInfo[] | undefined): string {
-      if (!devices || devices.length === 0) {
-        return '<div class="rtc-empty">No devices detected. Grant camera/microphone permission to see device labels.</div>';
-      }
-
-      const groups: Record<string, DeviceInfo[]> = {
-        videoinput: [],
-        audioinput: [],
-        audiooutput: []
-      };
-      for (const d of devices) {
-        (groups[d.kind] ??= []).push(d);
-      }
-
-      const titles: Record<string, string> = {
-        videoinput: 'Video Input',
-        audioinput: 'Audio Input',
-        audiooutput: 'Audio Output'
-      };
-
-      let html = '';
-      for (const [kind, items] of Object.entries(groups)) {
-        if (items.length === 0) continue;
-        html += `<div class="rtc-device-group">`;
-        html += `<div class="rtc-device-group-title">${escapeHtml(titles[kind] ?? kind)} (${items.length})</div>`;
+    private htmlDevices(devices: DeviceInfo[] | undefined) {
+      if (!devices?.length) return '<div class="rtc-empty">No devices detected.<br>Grant camera/microphone permission to see device labels.</div>';
+      const grp: Record<string, DeviceInfo[]> = { videoinput: [], audioinput: [], audiooutput: [] };
+      for (const d of devices) (grp[d.kind] ??= []).push(d);
+      const t: Record<string, string> = { videoinput: 'Video Input', audioinput: 'Audio Input', audiooutput: 'Audio Output' };
+      let h = '';
+      for (const [k, items] of Object.entries(grp)) {
+        if (!items.length) continue;
+        h += `<div class="rtc-dev-grp"><div class="rtc-sec-t">${esc(t[k] ?? k)} (${items.length})</div>`;
         for (const d of items) {
-          const label = d.label || '(unnamed device)';
-          html += `<div class="rtc-device-item">
-            <div class="rtc-device-label">${escapeHtml(label)}</div>
-            <div class="rtc-device-id">${escapeHtml(d.deviceId.slice(0, 24))}…</div>
-          </div>`;
+          h += `<div class="rtc-dev-item"><div class="rtc-dev-label">${esc(d.label || '(unnamed)')}</div><div class="rtc-dev-id">${esc(d.deviceId)}</div></div>`;
         }
-        html += '</div>';
+        h += '</div>';
       }
-      return html;
+      return h;
     }
 
-    private renderPeersTab(events: WebRtcEvent[], peers: PeerInfo[]): string {
-      if (peers.length === 0) {
-        return '<div class="rtc-empty">No RTCPeerConnection activity yet.</div>';
-      }
-
+    private htmlPeers(events: WebRtcEvent[], peers: PeerInfo[]) {
+      if (!peers.length) return '<div class="rtc-empty">No RTCPeerConnection activity yet.</div>';
       const peer = peers.find((p) => p.peerId === this.selectedPeerId) ?? peers[peers.length - 1]!;
       if (this.selectedPeerId !== peer.peerId) this.selectedPeerId = peer.peerId;
 
-      const stats = this.getLatestStats(events, peer.peerId);
-      const iceCandidates = this.getIceCandidates(events, peer.peerId);
-      const sdp = this.getSdpEvents(events, peer.peerId);
-      this.updateStatsHistory(events, peer.peerId);
+      const st = this.latestStats(events, peer.peerId);
+      const ice = this.iceCandidates(events, peer.peerId);
+      const sdp = this.sdpData(events, peer.peerId);
+      this.buildHistory(events, peer.peerId);
+      const dur = fmtDuration(peer.lastSeen - peer.firstSeen);
+      const rtt = st.currentRoundTripTime;
+      const rttMs = typeof rtt === 'number' ? `${(rtt as number * 1000).toFixed(0)}ms` : 'N/A';
 
-      const duration = formatDuration(peer.lastSeen - peer.firstSeen);
+      let h = '';
 
-      /* connection state */
-      let html = `<div class="rtc-section">
-        <div class="rtc-section-title">Connection</div>
-        <div class="rtc-grid">
-          <div class="rtc-stat-box">
-            <div class="rtc-stat-value">${escapeHtml(peer.connectionState)}</div>
-            <div class="rtc-stat-label">State</div>
-          </div>
-          <div class="rtc-stat-box">
-            <div class="rtc-stat-value">${escapeHtml(peer.iceState)}</div>
-            <div class="rtc-stat-label">ICE</div>
-          </div>
-          <div class="rtc-stat-box">
-            <div class="rtc-stat-value">${escapeHtml(peer.signalingState)}</div>
-            <div class="rtc-stat-label">Signaling</div>
-          </div>
-          <div class="rtc-stat-box">
-            <div class="rtc-stat-value">${escapeHtml(duration)}</div>
-            <div class="rtc-stat-label">Duration</div>
-          </div>
-        </div>
-      </div>`;
+      /* connection */
+      h += `<div class="rtc-sec"><div class="rtc-sec-t">Connection</div><div class="rtc-grid">
+        ${this.stat('State', peer.connectionState)}
+        ${this.stat('ICE', peer.iceState)}
+        ${this.stat('Signaling', peer.signalingState)}
+        ${this.stat('Duration', dur)}
+      </div></div>`;
 
-      /* live stats */
-      const rtt = stats.currentRoundTripTime;
-      const rttMs = typeof rtt === 'number' ? `${(rtt * 1000).toFixed(0)}ms` : 'N/A';
-      html += `<div class="rtc-section">
-        <div class="rtc-section-title">Stats</div>
-        <div class="rtc-grid">
-          <div class="rtc-stat-box">
-            <div class="rtc-stat-value ${this.rttClass(rtt)}">${escapeHtml(rttMs)}</div>
-            <div class="rtc-stat-label">RTT</div>
-          </div>
-          <div class="rtc-stat-box">
-            <div class="rtc-stat-value">${escapeHtml(stats.packetsLost !== undefined ? String(stats.packetsLost) : 'N/A')}</div>
-            <div class="rtc-stat-label">Lost</div>
-          </div>
-          <div class="rtc-stat-box">
-            <div class="rtc-stat-value">${escapeHtml(typeof stats.jitter === 'number' ? `${(stats.jitter as number * 1000).toFixed(1)}ms` : 'N/A')}</div>
-            <div class="rtc-stat-label">Jitter</div>
-          </div>
-          <div class="rtc-stat-box">
-            <div class="rtc-stat-value">${escapeHtml(stats.framesPerSecond !== undefined ? String(stats.framesPerSecond) : 'N/A')}</div>
-            <div class="rtc-stat-label">FPS</div>
-          </div>
-          <div class="rtc-stat-box">
-            <div class="rtc-stat-value">${escapeHtml(stats.framesDropped !== undefined ? String(stats.framesDropped) : 'N/A')}</div>
-            <div class="rtc-stat-label">Dropped</div>
-          </div>
-        </div>
-      </div>`;
+      /* stats */
+      h += `<div class="rtc-sec"><div class="rtc-sec-t">Stats</div><div class="rtc-grid">
+        ${this.stat('RTT', rttMs, this.rttCls(rtt))}
+        ${this.stat('Lost', fmtMetric(st.packetsLost))}
+        ${this.stat('Jitter', typeof st.jitter === 'number' ? `${((st.jitter as number) * 1000).toFixed(1)}ms` : 'N/A')}
+        ${this.stat('FPS', fmtMetric(st.framesPerSecond))}
+        ${this.stat('Dropped', fmtMetric(st.framesDropped))}
+      </div></div>`;
 
       /* bandwidth */
-      if (typeof stats.bytesSent === 'number' || typeof stats.bytesReceived === 'number') {
-        html += `<div class="rtc-section">
-          <div class="rtc-section-title">Bandwidth</div>
-          <div class="rtc-grid">
-            <div class="rtc-stat-box">
-              <div class="rtc-stat-value">${escapeHtml(formatBytes(stats.bytesSent))}</div>
-              <div class="rtc-stat-label">Sent</div>
-            </div>
-            <div class="rtc-stat-box">
-              <div class="rtc-stat-value">${escapeHtml(formatBytes(stats.bytesReceived))}</div>
-              <div class="rtc-stat-label">Received</div>
-            </div>
-          </div>
-        </div>`;
+      if (typeof st.bytesSent === 'number' || typeof st.bytesReceived === 'number') {
+        h += `<div class="rtc-sec"><div class="rtc-sec-t">Bandwidth</div><div class="rtc-grid">
+          ${this.stat('Sent', fmtBytes(st.bytesSent))}
+          ${this.stat('Received', fmtBytes(st.bytesReceived))}
+        </div></div>`;
       }
 
-      /* real-time graph */
-      html += this.renderGraph(peer.peerId);
+      /* graph */
+      h += this.graphSvg(peer.peerId);
 
       /* codecs */
-      const codecs = stats.codecs;
-      if (Array.isArray(codecs) && codecs.length > 0) {
-        html += `<div class="rtc-section">
-          <div class="rtc-section-title">Codecs</div>
-          <table class="rtc-mini-table">
-            <thead><tr><th>Type</th><th>Codec</th><th>Clock</th><th>Channels</th></tr></thead>
-            <tbody>`;
+      const codecs = st.codecs;
+      if (Array.isArray(codecs) && codecs.length) {
+        h += `<div class="rtc-sec"><div class="rtc-sec-t">Codecs</div><table class="rtc-tbl">
+          <thead><tr><th>Type</th><th>Codec</th><th>Clock</th><th>Ch</th></tr></thead><tbody>`;
         for (const c of codecs as { kind?: string; mimeType?: string; clockRate?: number; channels?: number }[]) {
-          html += `<tr>
-            <td>${escapeHtml(c.kind ?? '')}</td>
-            <td>${escapeHtml(c.mimeType ?? '')}</td>
-            <td>${c.clockRate ? `${c.clockRate}Hz` : ''}</td>
-            <td>${c.channels ?? ''}</td>
-          </tr>`;
+          h += `<tr><td>${esc(c.kind ?? '')}</td><td>${esc(c.mimeType ?? '')}</td><td>${c.clockRate ? `${c.clockRate}Hz` : ''}</td><td>${c.channels ?? ''}</td></tr>`;
         }
-        html += '</tbody></table></div>';
+        h += '</tbody></table></div>';
       }
 
-      /* ICE candidates */
-      if (iceCandidates.length > 0) {
-        const localCandidates: WebRtcEvent[] = [];
-        const remoteCandidates: WebRtcEvent[] = [];
-        for (const e of iceCandidates) {
-          if (e.data.direction === 'local') localCandidates.push(e);
-          else remoteCandidates.push(e);
-        }
-        const activePair = stats.selectedCandidatePair;
-
-        html += `<div class="rtc-section">
-          <div class="rtc-section-title">ICE Candidates</div>
-          <table class="rtc-mini-table">
-            <thead><tr><th style="width:22px"></th><th>Address</th><th>Port</th><th>Type</th></tr></thead>
-            <tbody>`;
-
-        for (const e of localCandidates) {
+      /* ICE */
+      if (ice.length) {
+        const loc = ice.filter((e) => e.data.direction === 'local');
+        const rem = ice.filter((e) => e.data.direction === 'remote');
+        h += `<div class="rtc-sec"><div class="rtc-sec-t">ICE Candidates (${ice.length})</div><table class="rtc-tbl">
+          <thead><tr><th style="width:20px"></th><th>Address</th><th>Port</th><th>Type</th></tr></thead><tbody>`;
+        for (const e of loc) {
           const d = e.data;
-          const active = d.candidateId === activePair;
-          html += `<tr${active ? ' class="is-active"' : ''}>
-            <td>L</td>
-            <td>${escapeHtml(String(d.address ?? d.ip ?? ''))}</td>
-            <td>${escapeHtml(String(d.port ?? ''))}</td>
-            <td>${escapeHtml(String(d.candidateType ?? ''))} (${escapeHtml(String(d.protocol ?? ''))})</td>
-          </tr>`;
+          h += `<tr><td>L</td><td>${esc(String(d.address ?? d.ip ?? ''))}</td><td>${esc(String(d.port ?? ''))}</td><td>${esc(String(d.candidateType ?? ''))} (${esc(String(d.protocol ?? ''))})</td></tr>`;
         }
-        for (const e of remoteCandidates) {
+        for (const e of rem) {
           const d = e.data;
-          html += `<tr>
-            <td>R</td>
-            <td>${escapeHtml(String(d.address ?? d.ip ?? ''))}</td>
-            <td>${escapeHtml(String(d.port ?? ''))}</td>
-            <td>${escapeHtml(String(d.candidateType ?? ''))} (${escapeHtml(String(d.protocol ?? ''))})</td>
-          </tr>`;
+          h += `<tr><td>R</td><td>${esc(String(d.address ?? d.ip ?? ''))}</td><td>${esc(String(d.port ?? ''))}</td><td>${esc(String(d.candidateType ?? ''))} (${esc(String(d.protocol ?? ''))})</td></tr>`;
         }
-        html += '</tbody></table></div>';
+        h += '</tbody></table></div>';
       }
 
       /* SDP */
       if (sdp.local || sdp.remote) {
-        const activeSdp = this.sdpView === 'local' ? sdp.local : sdp.remote;
-        html += `<div class="rtc-section">
-          <div class="rtc-section-title">SDP</div>
-          <div class="rtc-sdp-toggle">
-            <button class="rtc-sdp-btn${this.sdpView === 'local' ? ' is-active' : ''}" data-sdp="local">Local${sdp.local ? '' : ' (none)'}</button>
-            <button class="rtc-sdp-btn${this.sdpView === 'remote' ? ' is-active' : ''}" data-sdp="remote">Remote${sdp.remote ? '' : ' (none)'}</button>
+        const act = this.sdpView === 'local' ? sdp.local : sdp.remote;
+        h += `<div class="rtc-sec"><div class="rtc-sec-t">SDP</div>
+          <div class="rtc-sdp-btns">
+            <button class="rtc-sdp-b${this.sdpView === 'local' ? ' on' : ''}" data-sdp="local">Local${sdp.local ? '' : ' (none)'}</button>
+            <button class="rtc-sdp-b${this.sdpView === 'remote' ? ' on' : ''}" data-sdp="remote">Remote${sdp.remote ? '' : ' (none)'}</button>
           </div>
-          ${activeSdp ? `<pre class="rtc-sdp-pre">${escapeHtml(activeSdp)}</pre>` : '<div class="rtc-empty">No SDP available</div>'}
+          ${act ? `<pre class="rtc-sdp-pre">${esc(act)}</pre>` : '<div class="rtc-empty">No SDP</div>'}
         </div>`;
       }
 
-      return html;
+      return h;
     }
 
-    private renderTracksTab(events: WebRtcEvent[]): string {
-      const trackEvents = this.getTrackEvents(events);
-      if (trackEvents.length === 0) {
-        return '<div class="rtc-empty">No media tracks detected.</div>';
-      }
+    private htmlTracks(events: WebRtcEvent[]) {
+      const trks = this.tracks(events);
+      if (!trks.length) return '<div class="rtc-empty">No media tracks detected.</div>';
 
-      // Deduplicate by trackId, keep latest
-      const trackMap = new Map<string, WebRtcEvent>();
-      for (const e of trackEvents) {
-        const tid = String(e.data.trackId ?? e.id);
-        trackMap.set(tid, e);
-      }
-      const tracks = [...trackMap.values()];
-
-      let html = '';
-      for (const e of tracks) {
+      let h = '';
+      for (const e of trks) {
         const d = e.data;
         const tid = String(d.trackId ?? e.id);
-        const selected = this.selectedTrackId === tid;
+        const sel = this.selectedTrackId === tid;
         const kind = String(d.kind ?? 'unknown');
         const icon = kind === 'video' ? '&#x1F3A5;' : kind === 'audio' ? '&#x1F3A4;' : '&#x2753;';
-        const label = String(d.label ?? d.trackId ?? 'unknown');
+        const label = String(d.label || d.trackId || 'unknown');
         const state = String(d.readyState ?? d.state ?? 'unknown');
         const dir = d.direction === 'send' ? ' (send)' : d.direction === 'recv' ? ' (recv)' : '';
 
-        let settings = '';
+        let info = '';
         if (kind === 'video') {
-          const w = d.width;
-          const h = d.height;
-          const fps = d.frameRate;
-          if (w && h) settings = `${w}x${h}`;
-          if (fps) settings += settings ? ` @ ${fps}fps` : `${fps}fps`;
+          const parts: string[] = [];
+          if (d.width && d.height) parts.push(`${d.width}x${d.height}`);
+          if (d.frameRate) parts.push(`${d.frameRate}fps`);
+          info = parts.join(' @ ');
         } else if (kind === 'audio') {
-          const rate = d.sampleRate;
-          const channels = d.channelCount;
-          if (rate) settings = `${rate}Hz`;
-          if (channels) settings += settings ? ` ${channels === 2 ? 'stereo' : 'mono'}` : `${channels}ch`;
+          const parts: string[] = [];
+          if (d.sampleRate) parts.push(`${d.sampleRate}Hz`);
+          if (d.channelCount) parts.push(d.channelCount === 2 ? 'stereo' : 'mono');
+          info = parts.join(' ');
         }
 
-        html += `<div class="rtc-track-card${selected ? ' is-selected' : ''}" data-track-id="${escapeHtml(tid)}">
-          <div class="rtc-track-header">
-            <span class="rtc-track-icon">${icon}</span>
-            <span class="rtc-track-name">${escapeHtml(label)}${escapeHtml(dir)}</span>
-            <span class="rtc-track-state ${state === 'live' ? 'is-live' : 'is-ended'}">${escapeHtml(state)}</span>
+        h += `<div class="rtc-trk${sel ? ' on' : ''}" data-tid="${esc(tid)}">
+          <div class="rtc-trk-h">
+            <span class="rtc-trk-icon">${icon}</span>
+            <span class="rtc-trk-name">${esc(label)}${esc(dir)}</span>
+            <span class="rtc-trk-st ${state === 'live' ? 'live' : 'ended'}">${esc(state)}</span>
           </div>
-          ${settings ? `<div style="font-size:11px;opacity:.6;margin-left:26px">${escapeHtml(settings)}</div>` : ''}`;
+          ${info ? `<div class="rtc-trk-info">${esc(info)}</div>` : ''}`;
 
-        if (selected) {
-          const entries = Object.entries(d).filter(([k]) => !['trackId', 'label', 'kind', 'readyState', 'state'].includes(k));
-          html += `<dl class="rtc-track-detail">`;
-          for (const [k, v] of entries) {
-            html += `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(typeof v === 'object' ? JSON.stringify(v) : String(v ?? ''))}</dd>`;
+        if (sel) {
+          const skip = new Set(['trackId', 'label', 'kind', 'readyState', 'state', 'direction', 'width', 'height', 'frameRate', 'sampleRate', 'channelCount']);
+          const entries = Object.entries(d).filter(([k]) => !skip.has(k));
+          if (entries.length) {
+            h += '<dl class="rtc-trk-dl">';
+            for (const [k, v] of entries) h += `<dt>${esc(k)}</dt><dd>${esc(typeof v === 'object' ? JSON.stringify(v) : String(v ?? ''))}</dd>`;
+            h += '</dl>';
           }
-          html += '</dl>';
         }
-
-        html += '</div>';
+        h += '</div>';
       }
-      return html;
+      return h;
     }
 
-    /* ── main render ── */
+    /* ── mount / update ── */
 
     init($el: unknown) {
       super.init($el);
       this.panel = $el as ErudaPanelElement;
       window.addEventListener(INSPECTRA_WEBRTC_EVENT, this.onUpdate);
-      this.render();
+      this.fullRender();
     }
 
-    render() {
+    /** Full render — sets up the shell (tabs, peer bar). Called once or on tab/peer change. */
+    private fullRender() {
       if (!this.panel) return;
-      this.lastRenderTime = Date.now();
+      this.mounted = true;
 
       const state = getInspectraErudaState();
       const events = state.webrtcEvents;
-      const peers = this.getPeerList(events);
+      const peers = this.getPeers(events);
+      const trks = this.tracks(events);
 
-      if (!this.selectedPeerId && peers.length > 0) {
-        this.selectedPeerId = peers[peers.length - 1]!.peerId;
-      }
+      if (!this.selectedPeerId && peers.length) this.selectedPeerId = peers[peers.length - 1]!.peerId;
+      const sp = peers.find((p) => p.peerId === this.selectedPeerId);
 
-      const selectedPeer = peers.find((p) => p.peerId === this.selectedPeerId);
-
-      const tabDefs: { id: TabId; label: string; badge?: string }[] = [
-        { id: 'devices', label: 'Devices', badge: state.webrtcDevices ? String(state.webrtcDevices.length) : undefined },
-        { id: 'peers', label: 'Peers', badge: peers.length > 0 ? String(peers.length) : undefined },
-        { id: 'tracks', label: 'Tracks' }
+      const tabDefs: [TabId, string, number | undefined][] = [
+        ['devices', 'Devices', state.webrtcDevices?.length],
+        ['peers', 'Peers', peers.length || undefined],
+        ['tracks', 'Tracks', trks.length || undefined]
       ];
-
-      const tabs = tabDefs.map((t) =>
-        `<button class="rtc-tab${t.id === this.activeTab ? ' is-active' : ''}" data-tab="${t.id}">${t.label}${t.badge ? ` (${t.badge})` : ''}</button>`
+      const tabs = tabDefs.map(([id, lbl, cnt]) =>
+        `<button class="rtc-tab${id === this.activeTab ? ' is-active' : ''}" data-tab="${id}">${lbl}${cnt !== undefined ? ` (${cnt})` : ''}</button>`
       ).join('');
 
-      /* peer selector (for peers tab) */
       let peerBar = '';
-      if (this.activeTab === 'peers' && peers.length > 0) {
-        const options = peers.map((p) => {
-          const shortId = p.peerId.length > 20 ? `${p.peerId.slice(0, 18)}…` : p.peerId;
-          const label = `${shortId} — ${p.connectionState}`;
+      if (this.activeTab === 'peers' && peers.length) {
+        const opts = peers.map((p) => {
           const sel = p.peerId === this.selectedPeerId ? ' selected' : '';
-          return `<option value="${escapeHtml(p.peerId)}"${sel}>${escapeHtml(label)}</option>`;
+          return `<option value="${esc(p.peerId)}"${sel}>${esc(p.peerId)} — ${esc(p.connectionState)}</option>`;
         }).join('');
-        const dotClass = selectedPeer ? this.getPeerDotClass(selectedPeer) : 'is-closed';
-        peerBar = `<div class="rtc-peer-select-bar">
-          <span class="rtc-peer-dot ${dotClass}"></span>
-          <select class="rtc-peer-select" data-role="peer-select">${options}</select>
-          <span style="font-size:11px;opacity:.6">${peers.length} peer${peers.length > 1 ? 's' : ''}</span>
+        peerBar = `<div class="rtc-peer-bar">
+          <span class="rtc-dot ${sp ? this.dotClass(sp) : 'closed'}"></span>
+          <select class="rtc-peer-sel" data-role="psel">${opts}</select>
+          <span class="rtc-peer-count">${peers.length} peer${peers.length > 1 ? 's' : ''}</span>
         </div>`;
       }
 
-      /* tab content */
       let content = '';
       switch (this.activeTab) {
-        case 'devices':
-          content = this.renderDevicesTab(state.webrtcDevices);
-          break;
-        case 'peers':
-          content = this.renderPeersTab(events, peers);
-          break;
-        case 'tracks':
-          content = this.renderTracksTab(events);
-          break;
+        case 'devices': content = this.htmlDevices(state.webrtcDevices); break;
+        case 'peers': content = this.htmlPeers(events, peers); break;
+        case 'tracks': content = this.htmlTracks(events); break;
       }
 
-      this.panel.html(`
-        <div class="rtc-root">
-          <style>${CSS}</style>
-          <div class="rtc-tabs">${tabs}</div>
-          ${peerBar}
-          <div class="rtc-scroll" data-role="scroll">${content}</div>
-        </div>
-      `);
+      this.panel.html(`<div class="rtc-root"><style>${CSS}</style>
+        <div class="rtc-tabs">${tabs}</div>
+        ${peerBar}
+        <div class="rtc-content" data-role="content">${content}</div>
+      </div>`);
 
-      requestAnimationFrame(() => this.bindEvents());
+      requestAnimationFrame(() => this.bind());
     }
 
-    private bindEvents() {
+    /** Partial update — only replaces inner content, preserves scroll & focus. */
+    private updateContent() {
+      if (!this.mounted) { this.fullRender(); return; }
+
+      const el = document.querySelector('.rtc-root [data-role="content"]') as HTMLElement | null;
+      if (!el) { this.fullRender(); return; }
+
+      const scrollTop = el.scrollTop;
+
+      const state = getInspectraErudaState();
+      const events = state.webrtcEvents;
+      const peers = this.getPeers(events);
+      const trks = this.tracks(events);
+
+      if (!this.selectedPeerId && peers.length) this.selectedPeerId = peers[peers.length - 1]!.peerId;
+
+      // Update tab badges without full re-render
+      const tabBtns = document.querySelectorAll<HTMLElement>('.rtc-root [data-tab]');
+      const badges: Record<TabId, number | undefined> = {
+        devices: state.webrtcDevices?.length,
+        peers: peers.length || undefined,
+        tracks: trks.length || undefined
+      };
+      tabBtns.forEach((btn) => {
+        const id = btn.dataset.tab as TabId;
+        const base = id === 'devices' ? 'Devices' : id === 'peers' ? 'Peers' : 'Tracks';
+        const cnt = badges[id];
+        btn.textContent = cnt !== undefined ? `${base} (${cnt})` : base;
+      });
+
+      // Update peer dot
+      const sp = peers.find((p) => p.peerId === this.selectedPeerId);
+      const dot = document.querySelector('.rtc-root .rtc-dot') as HTMLElement | null;
+      if (dot && sp) { dot.className = `rtc-dot ${this.dotClass(sp)}`; }
+
+      // Update content area
+      let html = '';
+      switch (this.activeTab) {
+        case 'devices': html = this.htmlDevices(state.webrtcDevices); break;
+        case 'peers': html = this.htmlPeers(events, peers); break;
+        case 'tracks': html = this.htmlTracks(events); break;
+      }
+      el.innerHTML = html;
+
+      // Restore scroll
+      el.scrollTop = scrollTop;
+
+      // Bind content-level events (not tabs/peer-select — those stay)
+      this.bindContentEvents();
+    }
+
+    private bind() {
       const root = document.querySelector('.rtc-root');
       if (!root) return;
 
-      /* tabs */
       root.querySelectorAll<HTMLElement>('[data-tab]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          this.activeTab = btn.dataset.tab as TabId;
-          this.render();
-        });
+        btn.addEventListener('click', () => { this.activeTab = btn.dataset.tab as TabId; this.fullRender(); });
       });
 
-      /* peer select */
-      const peerSelect = root.querySelector('[data-role="peer-select"]') as HTMLSelectElement | null;
-      peerSelect?.addEventListener('change', () => {
-        this.selectedPeerId = peerSelect.value;
-        this.render();
-      });
-      peerSelect?.addEventListener('blur', () => {
-        if (this.pendingRender) {
-          this.pendingRender = false;
-          this.render();
-        }
-      });
+      const psel = root.querySelector('[data-role="psel"]') as HTMLSelectElement | null;
+      psel?.addEventListener('change', () => { this.selectedPeerId = psel.value; this.fullRender(); });
 
-      /* SDP buttons */
+      this.bindContentEvents();
+    }
+
+    private bindContentEvents() {
+      const root = document.querySelector('.rtc-root');
+      if (!root) return;
+
       root.querySelectorAll<HTMLElement>('[data-sdp]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          this.sdpView = btn.dataset.sdp as 'local' | 'remote';
-          this.render();
-        });
+        btn.addEventListener('click', () => { this.sdpView = btn.dataset.sdp as 'local' | 'remote'; this.updateContent(); });
       });
 
-      /* track cards */
-      root.querySelectorAll<HTMLElement>('[data-track-id]').forEach((card) => {
+      root.querySelectorAll<HTMLElement>('[data-tid]').forEach((card) => {
         card.addEventListener('click', () => {
-          const tid = card.dataset.trackId!;
+          const tid = card.dataset.tid!;
           this.selectedTrackId = this.selectedTrackId === tid ? null : tid;
-          this.render();
+          this.updateContent();
         });
       });
-
-      /* restore scroll */
-      const scrollEl = root.querySelector('[data-role="scroll"]') as HTMLElement | null;
-      if (scrollEl) {
-        scrollEl.scrollTop = this.scrollTop;
-        scrollEl.addEventListener('scroll', () => {
-          this.scrollTop = scrollEl.scrollTop;
-        }, { passive: true });
-      }
     }
 
-    show() {
-      this.panel?.show();
-      return this;
-    }
-
-    hide() {
-      this.panel?.hide();
-      return this;
-    }
+    show() { this.panel?.show(); return this; }
+    hide() { this.panel?.hide(); return this; }
 
     destroy() {
       window.removeEventListener(INSPECTRA_WEBRTC_EVENT, this.onUpdate);
-      if (this.renderTimer) clearTimeout(this.renderTimer);
+      if (this.throttleTimer) clearTimeout(this.throttleTimer);
       super.destroy();
     }
   }
