@@ -196,7 +196,6 @@ const createPluginsTab = () => (erudaApi: typeof import('eruda').default) => {
           const name = input.dataset.name as PluginName;
           if (input.checked) {
             activatePlugin(name);
-            eruda.show(name);
           } else {
             activatedPlugins.delete(name);
             try { eruda.remove(name); } catch {}
@@ -227,8 +226,9 @@ const initEruda = (sessionId: string, plugins: PluginName[]) => {
   // Add Plugins tab with toggle switches
   eruda.add(createPluginsTab());
 
-  // Auto-activate plugins from explicit list + localStorage persistence
-  for (const name of plugins) {
+  // Auto-activate only from localStorage (default is OFF for all)
+  const persisted = loadPersistedPlugins();
+  for (const name of persisted) {
     activatePlugin(name);
   }
 
@@ -419,10 +419,7 @@ export const Inspectra = {
       try {
         await loadScript(ERUDA_CDN);
         state.erudaLoaded = true;
-        // Merge explicit plugins with previously-persisted ones
-        const persisted = loadPersistedPlugins();
-        const effective = [...new Set([...plugins, ...persisted])];
-        initEruda(state.sessionId, effective);
+        initEruda(state.sessionId, plugins);
       } catch (error) {
         console.warn('[Inspectra] Failed to load Eruda:', error);
       }
