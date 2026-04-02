@@ -114,30 +114,103 @@ const addPluginTab = (name: PluginName) => {
   }
 };
 
-const togglePlugin = (name: PluginName) => {
-  const eruda = (window as unknown as { eruda?: typeof import('eruda').default }).eruda;
-  if (!eruda) return;
-
-  if (activatedPlugins.has(name)) {
-    // Deactivate — remove tab
-    activatedPlugins.delete(name);
-    try { eruda.remove(name); } catch { /* eruda may not support remove for custom tools */ }
-    persistPlugins();
-  } else {
-    // Activate — add tab
-    activatedPlugins.add(name);
-    addPluginTab(name);
-    eruda.show(name);
-    persistPlugins();
-  }
-};
-
 /** Activate without toggle (for initial load / auto-restore) */
 const activatePlugin = (name: PluginName) => {
   if (activatedPlugins.has(name)) return;
   activatedPlugins.add(name);
   addPluginTab(name);
   persistPlugins();
+};
+
+const PLUGIN_DEFS: { name: PluginName; label: string; desc: string }[] = [
+  { name: 'websocket', label: 'WebSocket Inspector', desc: 'WebSocket 통신 모니터링' },
+  { name: 'webrtc', label: 'WebRTC Inspector', desc: 'WebRTC 연결 상태 및 통계' },
+  { name: 'media', label: 'Media Permissions', desc: '카메라/마이크 권한 상태' },
+  { name: 'remote', label: 'Remote Debugging', desc: '원격 디버깅 (PC ↔ 모바일)' }
+];
+
+const createPluginsTab = () => (erudaApi: typeof import('eruda').default) => {
+  class PluginsTool extends erudaApi.Tool {
+    name = 'plugins';
+    private panel?: { html(v: string): void; show(): void; hide(): void };
+
+    init($el: unknown) {
+      super.init($el);
+      this.panel = $el as typeof this.panel;
+      this.render();
+    }
+
+    render() {
+      if (!this.panel) return;
+
+      const rows = PLUGIN_DEFS.map(({ name, label, desc }) => {
+        const checked = activatedPlugins.has(name);
+        return `<div class="ip-row" data-plugin="${name}">
+          <div class="ip-info">
+            <div class="ip-label">${label}</div>
+            <div class="ip-desc">${desc}</div>
+          </div>
+          <label class="ip-switch">
+            <input type="checkbox" ${checked ? 'checked' : ''} data-name="${name}" />
+            <span class="ip-slider"></span>
+          </label>
+        </div>`;
+      }).join('');
+
+      this.panel.html(`<div class="ip-root">
+        <style>
+          .ip-root { padding: 10px; color: inherit; font-size: 12px; }
+          .ip-row {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 12px 10px; border-bottom: 1px solid var(--border, rgba(127,127,127,.15));
+          }
+          .ip-info { flex: 1; min-width: 0; }
+          .ip-label { font-size: 13px; font-weight: 500; margin-bottom: 2px; }
+          .ip-desc { font-size: 11px; opacity: .5; }
+          .ip-switch { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; margin-left: 12px; }
+          .ip-switch input { opacity: 0; width: 0; height: 0; }
+          .ip-slider {
+            position: absolute; cursor: pointer; inset: 0;
+            background: rgba(127,127,127,.3); border-radius: 22px; transition: .2s;
+          }
+          .ip-slider::before {
+            content: ''; position: absolute; height: 16px; width: 16px;
+            left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: .2s;
+          }
+          .ip-switch input:checked + .ip-slider { background: #39b54a; }
+          .ip-switch input:checked + .ip-slider::before { transform: translateX(18px); }
+        </style>
+        <div class="ip-title" style="font-size:14px;font-weight:600;padding:6px 10px 12px;opacity:.7">Inspectra Plugins</div>
+        ${rows}
+      </div>`);
+
+      requestAnimationFrame(() => this.bind());
+    }
+
+    private bind() {
+      const eruda = (window as unknown as { eruda?: typeof import('eruda').default }).eruda;
+      if (!eruda) return;
+
+      document.querySelectorAll<HTMLInputElement>('.ip-root input[data-name]').forEach((input) => {
+        input.addEventListener('change', () => {
+          const name = input.dataset.name as PluginName;
+          if (input.checked) {
+            activatePlugin(name);
+            eruda.show(name);
+          } else {
+            activatedPlugins.delete(name);
+            try { eruda.remove(name); } catch {}
+            persistPlugins();
+          }
+        });
+      });
+    }
+
+    show() { (this.panel as { show(): void })?.show(); return this; }
+    hide() { (this.panel as { hide(): void })?.hide(); return this; }
+    destroy() { super.destroy(); }
+  }
+  return new PluginsTool();
 };
 
 const initEruda = (sessionId: string, plugins: PluginName[]) => {
@@ -147,46 +220,12 @@ const initEruda = (sessionId: string, plugins: PluginName[]) => {
   eruda.init({
     autoScale: true,
     useShadowDom: false,
-    tool: ['console', 'elements', 'network', 'resources', 'sources', 'info', 'settings'],
+    tool: ['console', 'elements', 'network', 'resources', 'sources', 'info', 'snippets', 'settings'],
     defaults: { theme: 'Dark', displaySize: 70 }
   });
 
-  // Register plugin toggles in Settings tab
-  const settings = eruda.get('settings') as unknown as {
-    separator(): void;
-    text(text: string): void;
-    switch(id: string, text: string, checked: boolean, handler: (val: boolean) => void): void;
-  } | undefined;
-
-  const pluginDefs: { name: PluginName; label: string }[] = [
-    { name: 'websocket', label: 'WebSocket Inspector' },
-    { name: 'webrtc', label: 'WebRTC Inspector' },
-    { name: 'media', label: 'Media Permissions' },
-    { name: 'remote', label: 'Remote Debugging' }
-  ];
-
-  if (settings) {
-    settings.separator();
-    settings.text('Inspectra Plugins');
-    for (const { name, label } of pluginDefs) {
-      const isOn = plugins.includes(name);
-      settings.switch(
-        `inspectra-${name}`,
-        label,
-        isOn,
-        (val: boolean) => {
-          if (val) {
-            activatePlugin(name);
-            eruda.show(name);
-          } else {
-            activatedPlugins.delete(name);
-            try { eruda.remove(name); } catch {}
-            persistPlugins();
-          }
-        }
-      );
-    }
-  }
+  // Add Plugins tab with toggle switches
+  eruda.add(createPluginsTab());
 
   // Auto-activate plugins from explicit list + localStorage persistence
   for (const name of plugins) {
