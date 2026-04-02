@@ -194,6 +194,9 @@ export const createErudaWebRtcPlugin = () => (erudaApi: typeof eruda) => {
     }
 
     private onUpdate = () => {
+      // Only auto-refresh on peers tab (stats update). Devices/tracks are static.
+      if (this.tab !== 'peers') return;
+
       // Defer while user interacts with controls
       const tag = document.activeElement?.tagName;
       if (tag === 'SELECT' || tag === 'INPUT') {
