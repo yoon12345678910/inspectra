@@ -217,6 +217,7 @@ const syncRuntimeState = (next?: {
   if (next?.webrtcEvent) {
     if (next.webrtcEvent.phase === 'stats') {
       // Stats go into separate per-peer history (max 60 per peer)
+      if (!agent.webrtcStatsHistory) agent.webrtcStatsHistory = new Map();
       const pid = next.webrtcEvent.peerId;
       const hist = agent.webrtcStatsHistory.get(pid) ?? [];
       hist.push(next.webrtcEvent);
@@ -242,6 +243,7 @@ const syncRuntimeState = (next?: {
 
   // Convert stats history Map to plain object for serialization
   const statsObj: Record<string, WebRtcEvent[]> = {};
+  if (!agent.webrtcStatsHistory) agent.webrtcStatsHistory = new Map();
   agent.webrtcStatsHistory.forEach((v, k) => { statsObj[k] = v; });
 
   const runtimeState: InspectraRuntimeState = {
