@@ -19,7 +19,7 @@ import {
 
 const BRIDGE_CHANNEL = 'inspectra:bridge';
 const AGENT_RELAY_CHANNEL = 'inspectra:agent-relay';
-const MAX_EVENT_HISTORY = 200;
+const MAX_EVENT_HISTORY = 500;
 const MAX_TEXT_PAYLOAD_CAPTURE = 16_384;
 const MAX_BINARY_PAYLOAD_CAPTURE = 8_192;
 
@@ -56,34 +56,17 @@ declare global {
 }
 
 class RingBuffer<T> {
-  private items: T[] = [];
+  private buf: T[] = [];
 
   push(item: T) {
-    this.items.push(item);
-    if (this.items.length > MAX_EVENT_HISTORY) {
-      this.items.shift();
+    this.buf.push(item);
+    if (this.buf.length > MAX_EVENT_HISTORY) {
+      this.buf.shift();
     }
   }
 
-  /** Replace last item at given index, or push if index is -1 */
-  replaceAt(index: number, item: T) {
-    if (index >= 0 && index < this.items.length) {
-      this.items[index] = item;
-    } else {
-      this.push(item);
-    }
-  }
-
-  /** Find last index matching predicate */
-  findLastIndex(predicate: (item: T) => boolean): number {
-    for (let i = this.items.length - 1; i >= 0; i--) {
-      if (predicate(this.items[i]!)) return i;
-    }
-    return -1;
-  }
-
-  toArray() {
-    return [...this.items];
+  toArray(): T[] {
+    return [...this.buf];
   }
 }
 
@@ -229,16 +212,7 @@ const syncRuntimeState = (next?: {
   const agent = getAgent();
 
   if (next?.webrtcEvent) {
-    if (next.webrtcEvent.phase === 'stats') {
-      // Replace previous stats for same peer (keeps only 1 stats event per peer)
-      const pid = next.webrtcEvent.peerId;
-      const idx = agent.webrtcBuffer.findLastIndex(
-        (e: WebRtcEvent) => e.phase === 'stats' && e.peerId === pid
-      );
-      agent.webrtcBuffer.replaceAt(idx, next.webrtcEvent);
-    } else {
-      agent.webrtcBuffer.push(next.webrtcEvent);
-    }
+    agent.webrtcBuffer.push(next.webrtcEvent);
   }
 
   if (next?.websocketEvent) {

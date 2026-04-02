@@ -93,10 +93,27 @@ interface StatsPoint { ts: number; rtt: number | null; bpsSent: number | null; b
 
 export const getInspectraErudaState = (): InspectraErudaState => {
   const store = window[STORE_KEY] ?? {};
+  let devices = Array.isArray(store.webrtcDevices) && store.webrtcDevices.length > 0
+    ? (store.webrtcDevices as DeviceInfo[])
+    : undefined;
+
+  // Fallback: try to enumerate devices directly if agent didn't provide them
+  if (!devices && navigator.mediaDevices?.enumerateDevices) {
+    // Fire async refresh — will populate on next render cycle
+    navigator.mediaDevices.enumerateDevices().then((devList) => {
+      const agent = (window as unknown as { __INSPECTRA_AGENT__?: { webrtcDevices?: DeviceInfo[] } }).__INSPECTRA_AGENT__;
+      if (agent && (!agent.webrtcDevices || agent.webrtcDevices.length === 0)) {
+        agent.webrtcDevices = devList
+          .filter((d) => d.kind === 'audioinput' || d.kind === 'audiooutput' || d.kind === 'videoinput')
+          .map((d) => ({ deviceId: d.deviceId, kind: d.kind as DeviceInfo['kind'], label: d.label, groupId: d.groupId }));
+      }
+    }).catch(() => {});
+  }
+
   return {
     sessionId: typeof store.sessionId === 'string' ? store.sessionId : '',
     webrtcEvents: Array.isArray(store.webrtcEvents) ? (store.webrtcEvents as WebRtcEvent[]) : [],
-    webrtcDevices: Array.isArray(store.webrtcDevices) ? (store.webrtcDevices as DeviceInfo[]) : undefined
+    webrtcDevices: devices
   };
 };
 
@@ -415,6 +432,7 @@ export const createErudaWebRtcPlugin = () => (erudaApi: typeof eruda) => {
 
       // Save scroll
       const prevScroll = this.scrollTop;
+      try {
 
       const state = getInspectraErudaState();
       const ev = state.webrtcEvents;
@@ -456,7 +474,8 @@ export const createErudaWebRtcPlugin = () => (erudaApi: typeof eruda) => {
         <div class="rtc-tabs">${tabs}</div>${bar}
         <div class="rtc-body">${content}</div>
       </div>`);
-      this.rendering = false;
+
+      } finally { this.rendering = false; }
 
       // Restore scroll & bind
       requestAnimationFrame(() => {
