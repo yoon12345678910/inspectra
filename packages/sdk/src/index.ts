@@ -98,10 +98,7 @@ const loadScript = (src: string): Promise<void> =>
     document.documentElement.appendChild(script);
   });
 
-const activatePlugin = (name: PluginName) => {
-  if (activatedPlugins.has(name)) return;
-  activatedPlugins.add(name);
-
+const addPluginTab = (name: PluginName) => {
   const eruda = (window as unknown as { eruda?: typeof import('eruda').default }).eruda;
   if (!eruda) return;
 
@@ -110,21 +107,36 @@ const activatePlugin = (name: PluginName) => {
   }
 
   switch (name) {
-    case 'webrtc':
-      eruda.add(createErudaWebRtcPlugin());
-      break;
-    case 'media':
-      eruda.add(createErudaMediaPermissionsPlugin());
-      break;
-    case 'websocket':
-      eruda.add(createErudaWebSocketPlugin());
-      break;
-    case 'remote':
-      eruda.add(createErudaRemotePlugin());
-      break;
+    case 'webrtc': eruda.add(createErudaWebRtcPlugin()); break;
+    case 'media': eruda.add(createErudaMediaPermissionsPlugin()); break;
+    case 'websocket': eruda.add(createErudaWebSocketPlugin()); break;
+    case 'remote': eruda.add(createErudaRemotePlugin()); break;
   }
+};
 
-  eruda.show(name);
+const togglePlugin = (name: PluginName) => {
+  const eruda = (window as unknown as { eruda?: typeof import('eruda').default }).eruda;
+  if (!eruda) return;
+
+  if (activatedPlugins.has(name)) {
+    // Deactivate — remove tab
+    activatedPlugins.delete(name);
+    try { eruda.remove(name); } catch { /* eruda may not support remove for custom tools */ }
+    persistPlugins();
+  } else {
+    // Activate — add tab
+    activatedPlugins.add(name);
+    addPluginTab(name);
+    eruda.show(name);
+    persistPlugins();
+  }
+};
+
+/** Activate without toggle (for initial load / auto-restore) */
+const activatePlugin = (name: PluginName) => {
+  if (activatedPlugins.has(name)) return;
+  activatedPlugins.add(name);
+  addPluginTab(name);
   persistPlugins();
 };
 
@@ -153,7 +165,7 @@ const initEruda = (sessionId: string, plugins: PluginName[]) => {
     ];
 
     for (const { name, label, desc } of available) {
-      snippets.add(label, () => activatePlugin(name), desc);
+      snippets.add(label, () => togglePlugin(name), desc);
     }
   }
 
