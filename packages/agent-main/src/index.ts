@@ -1,6 +1,7 @@
 import {
   INSPECTRA_WEBRTC_EVENT,
-  type WebRtcEvent
+  type WebRtcEvent,
+  type DeviceInfo
 } from '@inspectra/eruda-plugin-webrtc';
 import {
   INSPECTRA_MEDIA_PERMISSIONS_EVENT,
@@ -30,6 +31,7 @@ interface AgentState {
 
 interface InspectraRuntimeState extends InspectraMediaPermissionsState {
   webrtcEvents: WebRtcEvent[];
+  webrtcDevices: DeviceInfo[];
   websocketEvents: WebSocketEvent[];
   websocketDebugger: WebSocketDebuggerState;
 }
@@ -37,6 +39,7 @@ interface InspectraRuntimeState extends InspectraMediaPermissionsState {
 interface InspectraAgentGlobal {
   state: AgentState;
   webrtcBuffer: RingBuffer<WebRtcEvent>;
+  webrtcDevices: DeviceInfo[];
   websocketBuffer: RingBuffer<WebSocketEvent>;
   mediaPermissions: MediaPermissionSnapshot;
   websocketDebugger: WebSocketDebuggerState;
@@ -72,6 +75,7 @@ const getAgent = (): InspectraAgentGlobal => {
     window.__INSPECTRA_AGENT__ = {
       state: { bootstrapped: false, hooksInstalled: false, sessionId: '' },
       webrtcBuffer: new RingBuffer<WebRtcEvent>(),
+      webrtcDevices: [],
       websocketBuffer: new RingBuffer<WebSocketEvent>(),
       mediaPermissions: createDefaultMediaPermissionSnapshot(),
       websocketDebugger: { status: 'idle' },
@@ -225,6 +229,7 @@ const syncRuntimeState = (next?: {
   const runtimeState: InspectraRuntimeState = {
     sessionId: agent.state.sessionId,
     webrtcEvents: agent.webrtcBuffer.toArray(),
+    webrtcDevices: agent.webrtcDevices,
     websocketEvents: agent.websocketBuffer.toArray(),
     mediaPermissions: agent.mediaPermissions,
     websocketDebugger: agent.websocketDebugger
@@ -258,35 +263,45 @@ const syncRuntimeState = (next?: {
 const normalizeStats = async (peer: RTCPeerConnection) => {
   const stats = await peer.getStats();
   const data: Record<string, unknown> = {};
+  const codecs: { kind: string; mimeType: string; clockRate?: number; channels?: number }[] = [];
+  const codecIds = new Set<string>();
 
   stats.forEach((report) => {
-    if (
-      report.type === 'candidate-pair' &&
-      (report as unknown as { state?: string }).state === 'succeeded'
-    ) {
+    const r = report as Record<string, unknown>;
+
+    if (report.type === 'candidate-pair' && r.state === 'succeeded') {
       data.selectedCandidatePair = report.id;
-      data.currentRoundTripTime = (
-        report as unknown as { currentRoundTripTime?: number }
-      ).currentRoundTripTime;
+      data.currentRoundTripTime = r.currentRoundTripTime;
+      if (typeof r.bytesSent === 'number') data.bytesSent = r.bytesSent;
+      if (typeof r.bytesReceived === 'number') data.bytesReceived = r.bytesReceived;
+      if (typeof r.availableOutgoingBitrate === 'number') data.availableOutgoingBitrate = r.availableOutgoingBitrate;
     }
 
     if (report.type === 'inbound-rtp' || report.type === 'outbound-rtp') {
-      if ('packetsLost' in report) {
-        data.packetsLost = report.packetsLost;
-      }
-      if ('jitter' in report) {
-        data.jitter = report.jitter;
-      }
-      if ('framesDropped' in report) {
-        data.framesDropped = (report as unknown as { framesDropped?: number }).framesDropped;
-      }
-      if ('framesPerSecond' in report) {
-        data.framesPerSecond = (
-          report as unknown as { framesPerSecond?: number }
-        ).framesPerSecond;
+      if ('packetsLost' in report) data.packetsLost = r.packetsLost;
+      if ('jitter' in report) data.jitter = r.jitter;
+      if ('framesDropped' in r) data.framesDropped = r.framesDropped;
+      if ('framesPerSecond' in r) data.framesPerSecond = r.framesPerSecond;
+      if ('frameWidth' in r) data.frameWidth = r.frameWidth;
+      if ('frameHeight' in r) data.frameHeight = r.frameHeight;
+
+      const codecId = r.codecId as string | undefined;
+      if (codecId && !codecIds.has(codecId)) {
+        codecIds.add(codecId);
+        const codecReport = stats.get(codecId) as Record<string, unknown> | undefined;
+        if (codecReport) {
+          codecs.push({
+            kind: String(r.kind ?? ''),
+            mimeType: String(codecReport.mimeType ?? ''),
+            clockRate: codecReport.clockRate as number | undefined,
+            channels: codecReport.channels as number | undefined
+          });
+        }
       }
     }
   });
+
+  if (codecs.length > 0) data.codecs = codecs;
 
   data.connectionState = peer.connectionState;
   data.iceConnectionState = peer.iceConnectionState;
@@ -432,11 +447,74 @@ const syncDebuggerWebSocketStatus = (payload: {
   });
 };
 
+const emitTrackInfo = (
+  peerId: string,
+  track: MediaStreamTrack,
+  direction: 'send' | 'recv'
+) => {
+  const data: Record<string, unknown> = {
+    trackId: track.id,
+    kind: track.kind,
+    label: track.label,
+    readyState: track.readyState,
+    enabled: track.enabled,
+    muted: track.muted,
+    direction
+  };
+
+  try {
+    const settings = track.getSettings();
+    if (settings.width) data.width = settings.width;
+    if (settings.height) data.height = settings.height;
+    if (settings.frameRate) data.frameRate = Math.round(settings.frameRate);
+    if (settings.sampleRate) data.sampleRate = settings.sampleRate;
+    if (settings.channelCount) data.channelCount = settings.channelCount;
+    if (settings.deviceId) data.deviceId = settings.deviceId;
+    if (settings.facingMode) data.facingMode = settings.facingMode;
+  } catch {
+    // getSettings may not be available
+  }
+
+  const event: WebRtcEvent = {
+    ...baseEvent(),
+    type: 'webrtc',
+    peerId,
+    phase: 'track',
+    data
+  };
+  syncRuntimeState({ webrtcEvent: event });
+};
+
+const refreshWebRtcDevices = async () => {
+  if (!navigator.mediaDevices?.enumerateDevices) return;
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const agent = getAgent();
+    agent.webrtcDevices = devices
+      .filter((d) => d.kind === 'audioinput' || d.kind === 'audiooutput' || d.kind === 'videoinput')
+      .map((d) => ({
+        deviceId: d.deviceId,
+        kind: d.kind as DeviceInfo['kind'],
+        label: d.label,
+        groupId: d.groupId
+      }));
+    syncRuntimeState();
+  } catch {
+    // ignore
+  }
+};
+
 const installWebRtcHook = () => {
   if (!window.RTCPeerConnection) {
     syncRuntimeState();
     return;
   }
+
+  // Refresh devices on init and on device change
+  void refreshWebRtcDevices();
+  navigator.mediaDevices?.addEventListener?.('devicechange', () => {
+    void refreshWebRtcDevices();
+  });
 
   const OriginalPeer = window.RTCPeerConnection;
   const WrappedPeer = function (
@@ -473,6 +551,83 @@ const installWebRtcHook = () => {
     peer.addEventListener('connectionstatechange', emitState);
     peer.addEventListener('iceconnectionstatechange', emitState);
     peer.addEventListener('signalingstatechange', emitState);
+
+    // ICE candidate capture
+    peer.addEventListener('icecandidate', (event) => {
+      if (!event.candidate) return;
+      const c = event.candidate;
+      emitPeer('ice-candidate', {
+        direction: 'local',
+        candidate: c.candidate,
+        sdpMid: c.sdpMid,
+        sdpMLineIndex: c.sdpMLineIndex,
+        address: c.address,
+        port: c.port,
+        protocol: c.protocol,
+        candidateType: c.type,
+        priority: c.priority
+      });
+    });
+
+    // Track events
+    peer.addEventListener('track', (event) => {
+      emitTrackInfo(peerId, event.track, 'recv');
+    });
+
+    // SDP capture — wrap setLocalDescription / setRemoteDescription
+    const origSetLocal = peer.setLocalDescription.bind(peer);
+    peer.setLocalDescription = async (desc?: RTCLocalSessionDescriptionInit) => {
+      await origSetLocal(desc);
+      const sdp = peer.localDescription;
+      if (sdp) {
+        emitPeer('sdp', {
+          direction: 'local',
+          type: sdp.type,
+          sdp: sdp.sdp
+        });
+      }
+      // Emit sender tracks after SDP is set
+      for (const sender of peer.getSenders()) {
+        if (sender.track) emitTrackInfo(peerId, sender.track, 'send');
+      }
+    };
+
+    const origSetRemote = peer.setRemoteDescription.bind(peer);
+    peer.setRemoteDescription = async (desc: RTCSessionDescriptionInit) => {
+      await origSetRemote(desc);
+      const sdp = peer.remoteDescription;
+      if (sdp) {
+        emitPeer('sdp', {
+          direction: 'remote',
+          type: sdp.type,
+          sdp: sdp.sdp
+        });
+      }
+    };
+
+    // addIceCandidate capture (remote candidates)
+    const origAddIce = peer.addIceCandidate.bind(peer);
+    peer.addIceCandidate = async (candidate?: RTCIceCandidateInit | null) => {
+      await origAddIce(candidate);
+      if (candidate && 'candidate' in candidate && candidate.candidate) {
+        try {
+          const c = new RTCIceCandidate(candidate);
+          emitPeer('ice-candidate', {
+            direction: 'remote',
+            candidate: c.candidate,
+            sdpMid: c.sdpMid,
+            sdpMLineIndex: c.sdpMLineIndex,
+            address: c.address,
+            port: c.port,
+            protocol: c.protocol,
+            candidateType: c.type,
+            priority: c.priority
+          });
+        } catch {
+          // ignore parse errors
+        }
+      }
+    };
 
     const interval = window.setInterval(async () => {
       if (peer.connectionState === 'closed') {
