@@ -511,6 +511,13 @@ const installWebRtcHook = () => {
     return;
   }
 
+  // Guard against double-wrapping (two bundles both import agent-main)
+  if ((window.RTCPeerConnection as unknown as { __INSPECTRA_WRAPPED__?: boolean }).__INSPECTRA_WRAPPED__) {
+    // Hooks already installed by another bundle — just refresh devices
+    void refreshWebRtcDevices();
+    return;
+  }
+
   // Refresh devices on init and on device change
   void refreshWebRtcDevices();
   navigator.mediaDevices?.addEventListener?.('devicechange', () => {
@@ -640,6 +647,8 @@ const installWebRtcHook = () => {
 
     const interval = window.setInterval(async () => {
       if (peer.connectionState === 'closed') {
+        window.clearInterval(interval);
+        emitPeer('closed', { connectionState: 'closed' });
         return;
       }
 
@@ -662,6 +671,7 @@ const installWebRtcHook = () => {
     return peer;
   } as unknown as typeof RTCPeerConnection;
 
+  (WrappedPeer as unknown as { __INSPECTRA_WRAPPED__: boolean }).__INSPECTRA_WRAPPED__ = true;
   WrappedPeer.prototype = OriginalPeer.prototype;
   Object.setPrototypeOf(WrappedPeer, OriginalPeer);
   window.RTCPeerConnection = WrappedPeer;
@@ -771,8 +781,14 @@ const installMediaPermissionHook = () => {
     return;
   }
 
+  // Guard against double-wrapping (two bundles both import agent-main)
+  if ((navigator.mediaDevices.getUserMedia as unknown as { __INSPECTRA_WRAPPED__?: boolean }).__INSPECTRA_WRAPPED__) {
+    void refreshMediaPermissions();
+    return;
+  }
+
   const originalGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
-  navigator.mediaDevices.getUserMedia = async (constraints = {}) => {
+  const wrappedGetUserMedia = async (constraints: MediaStreamConstraints = {}) => {
     const request: MediaPermissionRequest = {
       ts: Date.now(),
       audio: hasRequestedTrack(constraints.audio),
@@ -805,6 +821,8 @@ const installMediaPermissionHook = () => {
       throw error;
     }
   };
+  (wrappedGetUserMedia as unknown as { __INSPECTRA_WRAPPED__: boolean }).__INSPECTRA_WRAPPED__ = true;
+  navigator.mediaDevices.getUserMedia = wrappedGetUserMedia;
 
   navigator.mediaDevices.addEventListener?.('devicechange', () => {
     void refreshMediaPermissions();

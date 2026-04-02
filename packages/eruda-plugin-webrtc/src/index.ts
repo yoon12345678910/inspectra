@@ -97,15 +97,18 @@ export const getInspectraErudaState = (): InspectraErudaState => {
     ? (store.webrtcDevices as DeviceInfo[])
     : undefined;
 
-  // Fallback: try to enumerate devices directly if agent didn't provide them
+  // Fallback: enumerate devices directly if agent didn't provide them
   if (!devices && navigator.mediaDevices?.enumerateDevices) {
-    // Fire async refresh — will populate on next render cycle
     navigator.mediaDevices.enumerateDevices().then((devList) => {
-      const agent = (window as unknown as { __INSPECTRA_AGENT__?: { webrtcDevices?: DeviceInfo[] } }).__INSPECTRA_AGENT__;
-      if (agent && (!agent.webrtcDevices || agent.webrtcDevices.length === 0)) {
-        agent.webrtcDevices = devList
-          .filter((d) => d.kind === 'audioinput' || d.kind === 'audiooutput' || d.kind === 'videoinput')
-          .map((d) => ({ deviceId: d.deviceId, kind: d.kind as DeviceInfo['kind'], label: d.label, groupId: d.groupId }));
+      const filtered = devList
+        .filter((d) => d.kind === 'audioinput' || d.kind === 'audiooutput' || d.kind === 'videoinput')
+        .map((d) => ({ deviceId: d.deviceId, kind: d.kind as DeviceInfo['kind'], label: d.label, groupId: d.groupId }));
+      if (filtered.length > 0) {
+        const s = window[STORE_KEY];
+        if (s && (!Array.isArray(s.webrtcDevices) || (s.webrtcDevices as DeviceInfo[]).length === 0)) {
+          s.webrtcDevices = filtered;
+          window.dispatchEvent(new CustomEvent(INSPECTRA_WEBRTC_EVENT));
+        }
       }
     }).catch(() => {});
   }
@@ -194,9 +197,6 @@ export const createErudaWebRtcPlugin = () => (erudaApi: typeof eruda) => {
     }
 
     private onUpdate = () => {
-      // Only auto-refresh on peers tab (stats update). Devices/tracks are static.
-      if (this.tab !== 'peers') return;
-
       // Defer while user interacts with controls
       const tag = document.activeElement?.tagName;
       if (tag === 'SELECT' || tag === 'INPUT') {
@@ -511,7 +511,7 @@ export const createErudaWebRtcPlugin = () => (erudaApi: typeof eruda) => {
       );
     }
 
-    show() { this.panel?.show(); return this; }
+    show() { this.panel?.show(); this.render(); return this; }
     hide() { this.panel?.hide(); return this; }
     destroy() {
       window.removeEventListener(INSPECTRA_WEBRTC_EVENT, this.onUpdate);

@@ -223,9 +223,10 @@ const initEruda = (sessionId: string, plugins: PluginName[]) => {
     defaults: { theme: 'Dark', displaySize: 70 }
   });
 
-  // Restore persisted plugins BEFORE adding Plugins tab (so toggles render correctly)
+  // Activate requested plugins + restore persisted plugins
   const persisted = loadPersistedPlugins();
-  for (const name of persisted) {
+  const toActivate = new Set([...plugins, ...persisted]);
+  for (const name of toActivate) {
     activatePlugin(name);
   }
 
