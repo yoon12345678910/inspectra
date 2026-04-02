@@ -31,6 +31,7 @@ interface AgentState {
 
 interface InspectraRuntimeState extends InspectraMediaPermissionsState {
   webrtcEvents: WebRtcEvent[];
+  webrtcStatsHistory: Record<string, WebRtcEvent[]>;
   webrtcDevices: DeviceInfo[];
   websocketEvents: WebSocketEvent[];
   websocketDebugger: WebSocketDebuggerState;
@@ -39,6 +40,7 @@ interface InspectraRuntimeState extends InspectraMediaPermissionsState {
 interface InspectraAgentGlobal {
   state: AgentState;
   webrtcBuffer: RingBuffer<WebRtcEvent>;
+  webrtcStatsHistory: Map<string, WebRtcEvent[]>;
   webrtcDevices: DeviceInfo[];
   websocketBuffer: RingBuffer<WebSocketEvent>;
   mediaPermissions: MediaPermissionSnapshot;
@@ -75,6 +77,7 @@ const getAgent = (): InspectraAgentGlobal => {
     window.__INSPECTRA_AGENT__ = {
       state: { bootstrapped: false, hooksInstalled: false, sessionId: '' },
       webrtcBuffer: new RingBuffer<WebRtcEvent>(),
+      webrtcStatsHistory: new Map(),
       webrtcDevices: [],
       websocketBuffer: new RingBuffer<WebSocketEvent>(),
       mediaPermissions: createDefaultMediaPermissionSnapshot(),
@@ -212,7 +215,17 @@ const syncRuntimeState = (next?: {
   const agent = getAgent();
 
   if (next?.webrtcEvent) {
-    agent.webrtcBuffer.push(next.webrtcEvent);
+    if (next.webrtcEvent.phase === 'stats') {
+      // Stats go into separate per-peer history (max 60 per peer)
+      const pid = next.webrtcEvent.peerId;
+      const hist = agent.webrtcStatsHistory.get(pid) ?? [];
+      hist.push(next.webrtcEvent);
+      if (hist.length > 60) hist.shift();
+      agent.webrtcStatsHistory.set(pid, hist);
+    } else {
+      // One-time events go into the main buffer (won't be pushed out by stats)
+      agent.webrtcBuffer.push(next.webrtcEvent);
+    }
   }
 
   if (next?.websocketEvent) {
@@ -227,9 +240,14 @@ const syncRuntimeState = (next?: {
     agent.websocketDebugger = next.websocketDebugger;
   }
 
+  // Convert stats history Map to plain object for serialization
+  const statsObj: Record<string, WebRtcEvent[]> = {};
+  agent.webrtcStatsHistory.forEach((v, k) => { statsObj[k] = v; });
+
   const runtimeState: InspectraRuntimeState = {
     sessionId: agent.state.sessionId,
     webrtcEvents: agent.webrtcBuffer.toArray(),
+    webrtcStatsHistory: statsObj,
     webrtcDevices: agent.webrtcDevices,
     websocketEvents: agent.websocketBuffer.toArray(),
     mediaPermissions: agent.mediaPermissions,
