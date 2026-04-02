@@ -223,14 +223,14 @@ const initEruda = (sessionId: string, plugins: PluginName[]) => {
     defaults: { theme: 'Dark', displaySize: 70 }
   });
 
-  // Add Plugins tab with toggle switches
-  eruda.add(createPluginsTab());
-
-  // Auto-activate only from localStorage (default is OFF for all)
+  // Restore persisted plugins BEFORE adding Plugins tab (so toggles render correctly)
   const persisted = loadPersistedPlugins();
   for (const name of persisted) {
     activatePlugin(name);
   }
+
+  // Add Plugins tab with toggle switches (reads activatedPlugins for initial state)
+  eruda.add(createPluginsTab());
 
   eruda.get('info')?.add('Inspectra Session', () => sessionId);
   eruda.get('info')?.add('Inspectra Runtime', 'SDK');
