@@ -19,6 +19,31 @@ export type { RelayMessage, RelayClientOptions } from './relay-client';
 
 export type PluginName = 'websocket' | 'webrtc' | 'media' | 'remote';
 
+const ALL_PLUGINS: PluginName[] = ['websocket', 'webrtc', 'media', 'remote'];
+const STORAGE_KEY = 'inspectra:enabled-plugins';
+
+const loadPersistedPlugins = (): PluginName[] => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((p: unknown): p is PluginName =>
+      typeof p === 'string' && ALL_PLUGINS.includes(p as PluginName)
+    );
+  } catch {
+    return [];
+  }
+};
+
+const persistPlugins = () => {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([...activatedPlugins]));
+  } catch {
+    // localStorage may be unavailable (incognito, iframe sandbox)
+  }
+};
+
 export interface InspectraOptions {
   relay?: string;
   room?: string;
@@ -36,6 +61,7 @@ interface InspectraState {
 
 const ERUDA_CDN = 'https://cdn.jsdelivr.net/npm/eruda';
 const GLOBAL_KEY = '__INSPECTRA_SDK__';
+const activatedPlugins = new Set<PluginName>();
 
 const getState = (): InspectraState => {
   const win = window as unknown as Record<string, unknown>;
@@ -72,8 +98,6 @@ const loadScript = (src: string): Promise<void> =>
     document.documentElement.appendChild(script);
   });
 
-const activatedPlugins = new Set<PluginName>();
-
 const activatePlugin = (name: PluginName) => {
   if (activatedPlugins.has(name)) return;
   activatedPlugins.add(name);
@@ -101,6 +125,7 @@ const activatePlugin = (name: PluginName) => {
   }
 
   eruda.show(name);
+  persistPlugins();
 };
 
 const initEruda = (sessionId: string, plugins: PluginName[]) => {
@@ -110,27 +135,13 @@ const initEruda = (sessionId: string, plugins: PluginName[]) => {
   eruda.init({
     autoScale: true,
     useShadowDom: false,
-    tool: ['console', 'elements', 'network', 'resources', 'sources', 'info', 'snippets', 'settings'],
+    tool: ['console', 'elements', 'network', 'resources', 'sources', 'info', 'settings'],
     defaults: { theme: 'Dark', displaySize: 70 }
   });
 
-  const snippets = eruda.get('snippets') as unknown as {
-    add(name: string, fn: () => void, desc: string): void;
-  } | undefined;
-
-  if (snippets) {
-    const available: { name: PluginName; label: string; desc: string }[] = [
-      { name: 'websocket', label: 'WebSocket Inspector', desc: 'WebSocket 통신 모니터링' },
-      { name: 'webrtc', label: 'WebRTC Inspector', desc: 'WebRTC 연결 상태 및 통계' },
-      { name: 'media', label: 'Media Permissions', desc: '카메라/마이크 권한 상태' },
-      { name: 'remote', label: 'Remote Debugging', desc: '원격 디버깅 (PC ↔ 모바일)' }
-    ];
-
-    for (const { name, label, desc } of available) {
-      if (plugins.includes(name)) {
-        snippets.add(label, () => activatePlugin(name), desc);
-      }
-    }
+  // Activate all requested plugins as tabs directly (no snippets)
+  for (const name of plugins) {
+    activatePlugin(name);
   }
 
   eruda.get('info')?.add('Inspectra Session', () => sessionId);
@@ -304,7 +315,8 @@ export const Inspectra = {
     state.sessionId = createSessionId();
     state.initialized = true;
 
-    bootstrapInspectraAgent([]);
+    // Install ALL hooks immediately (before Eruda loads) so APIs are wrapped early
+    bootstrapInspectraAgent();
     setupRemoteEventListeners(state);
 
     if (relay) {
@@ -319,7 +331,10 @@ export const Inspectra = {
       try {
         await loadScript(ERUDA_CDN);
         state.erudaLoaded = true;
-        initEruda(state.sessionId, plugins.length > 0 ? plugins : []);
+        // Merge explicit plugins with previously-persisted ones
+        const persisted = loadPersistedPlugins();
+        const effective = [...new Set([...plugins, ...persisted])];
+        initEruda(state.sessionId, effective);
       } catch (error) {
         console.warn('[Inspectra] Failed to load Eruda:', error);
       }
