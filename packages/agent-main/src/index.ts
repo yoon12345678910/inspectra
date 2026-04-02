@@ -189,6 +189,7 @@ const baseEvent = () => ({
 
 const syncRuntimeState = (next?: {
   webrtcEvent?: WebRtcEvent;
+  webrtcDevices?: boolean;
   websocketEvent?: WebSocketEvent;
   mediaPermissions?: MediaPermissionSnapshot;
   websocketDebugger?: WebSocketDebuggerState;
@@ -236,7 +237,7 @@ const syncRuntimeState = (next?: {
   };
   window.__INSPECTRA_ERUDA_STATE__ = runtimeState as unknown as Record<string, unknown>;
 
-  if (next?.webrtcEvent) {
+  if (next?.webrtcEvent || next?.webrtcDevices) {
     window.dispatchEvent(new CustomEvent(INSPECTRA_WEBRTC_EVENT));
   }
 
@@ -498,7 +499,7 @@ const refreshWebRtcDevices = async () => {
         label: d.label,
         groupId: d.groupId
       }));
-    syncRuntimeState();
+    syncRuntimeState({ webrtcDevices: true });
   } catch {
     // ignore
   }
@@ -569,10 +570,18 @@ const installWebRtcHook = () => {
       });
     });
 
-    // Track events
+    // Track events — received tracks
     peer.addEventListener('track', (event) => {
       emitTrackInfo(peerId, event.track, 'recv');
     });
+
+    // Track events — sent tracks via addTrack
+    const origAddTrack = peer.addTrack.bind(peer);
+    peer.addTrack = (track: MediaStreamTrack, ...streams: MediaStream[]) => {
+      const sender = origAddTrack(track, ...streams);
+      emitTrackInfo(peerId, track, 'send');
+      return sender;
+    };
 
     // SDP capture — wrap setLocalDescription / setRemoteDescription
     const origSetLocal = peer.setLocalDescription.bind(peer);

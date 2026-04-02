@@ -426,13 +426,27 @@ export const createErudaWebRtcPlugin = () => (erudaApi: typeof eruda) => {
   class InspectraWebRtcTool extends erudaApi.Tool {
     name = 'webrtc';
     private panel?: ErudaPanelElement;
-    private onUpdate = () => this.render();
+    private onUpdate = () => {
+      // Throttle renders to max once per 500ms to prevent select box flickering
+      const now = Date.now();
+      const elapsed = now - this.lastRenderTime;
+      if (elapsed >= 500) {
+        this.render();
+      } else if (!this.renderTimer) {
+        this.renderTimer = setTimeout(() => {
+          this.renderTimer = null;
+          this.render();
+        }, 500 - elapsed);
+      }
+    };
 
     private activeTab: TabId = 'peers';
     private selectedPeerId: string | null = null;
     private selectedTrackId: string | null = null;
     private sdpView: 'local' | 'remote' = 'local';
     private scrollTop = 0;
+    private renderTimer: ReturnType<typeof setTimeout> | null = null;
+    private lastRenderTime = 0;
 
     // Stats history per peer for graph
     private statsHistory = new Map<string, StatsPoint[]>();
@@ -868,6 +882,7 @@ export const createErudaWebRtcPlugin = () => (erudaApi: typeof eruda) => {
 
     render() {
       if (!this.panel) return;
+      this.lastRenderTime = Date.now();
 
       const state = getInspectraErudaState();
       const events = state.webrtcEvents;
@@ -893,7 +908,8 @@ export const createErudaWebRtcPlugin = () => (erudaApi: typeof eruda) => {
       let peerBar = '';
       if (this.activeTab === 'peers' && peers.length > 0) {
         const options = peers.map((p) => {
-          const label = `${p.peerId.slice(0, 8)}… — ${p.connectionState}`;
+          const shortId = p.peerId.length > 20 ? `${p.peerId.slice(0, 18)}…` : p.peerId;
+          const label = `${shortId} — ${p.connectionState}`;
           const sel = p.peerId === this.selectedPeerId ? ' selected' : '';
           return `<option value="${escapeHtml(p.peerId)}"${sel}>${escapeHtml(label)}</option>`;
         }).join('');
@@ -989,6 +1005,7 @@ export const createErudaWebRtcPlugin = () => (erudaApi: typeof eruda) => {
 
     destroy() {
       window.removeEventListener(INSPECTRA_WEBRTC_EVENT, this.onUpdate);
+      if (this.renderTimer) clearTimeout(this.renderTimer);
       super.destroy();
     }
   }
