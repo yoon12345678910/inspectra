@@ -426,8 +426,17 @@ export const createErudaWebRtcPlugin = () => (erudaApi: typeof eruda) => {
   class InspectraWebRtcTool extends erudaApi.Tool {
     name = 'webrtc';
     private panel?: ErudaPanelElement;
+    private pendingRender = false;
+
     private onUpdate = () => {
-      // Throttle renders to max once per 500ms to prevent select box flickering
+      // Skip render if a select/input is focused to prevent closing dropdowns
+      const active = document.activeElement;
+      if (active && (active.tagName === 'SELECT' || active.tagName === 'INPUT')) {
+        this.pendingRender = true;
+        return;
+      }
+
+      // Throttle renders to max once per 500ms to prevent flickering
       const now = Date.now();
       const elapsed = now - this.lastRenderTime;
       if (elapsed >= 500) {
@@ -964,6 +973,12 @@ export const createErudaWebRtcPlugin = () => (erudaApi: typeof eruda) => {
       peerSelect?.addEventListener('change', () => {
         this.selectedPeerId = peerSelect.value;
         this.render();
+      });
+      peerSelect?.addEventListener('blur', () => {
+        if (this.pendingRender) {
+          this.pendingRender = false;
+          this.render();
+        }
       });
 
       /* SDP buttons */
